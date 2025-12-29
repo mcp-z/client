@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from '../../../src/auth/rfc9728-discovery.ts';
-import { startDcrTestServer } from '../../lib/servers/dcr-test-server.ts';
+import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 describe('unit/auth/rfc9728-discovery', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;

@@ -12,7 +12,7 @@
  * - Configurable port via --port argument
  * - Graceful shutdown on SIGINT/SIGTERM
  *
- * USAGE: node test/lib/servers/echo-http.ts --port 3000
+ * USAGE: node test/lib/servers/echo-http.mjs --port 3000
  */
 
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -96,9 +96,9 @@ async function main() {
     (args) => ({
       messages: [
         {
-          role: 'user' as const,
+          role: 'user',
           content: {
-            type: 'text' as const,
+            type: 'text',
             text: `Please process this message: ${args.message}`,
           },
         },
@@ -155,7 +155,7 @@ async function main() {
   });
 
   // Handle startup failures (port already in use, etc.)
-  httpServer.on('error', (error: NodeJS.ErrnoException) => {
+  httpServer.on('error', (error) => {
     console.error(`[echo-http] FATAL: Failed to start server on port ${config.port}:`, error.message);
     if (error.code === 'EADDRINUSE') {
       console.error(`[echo-http] FATAL: Port ${config.port} is already in use`);

@@ -8,7 +8,7 @@ import Keyv from 'keyv';
 import { probeAuthCapabilities } from '../../../src/auth/index.ts';
 import type { TokenSet } from '../../../src/auth/types.ts';
 import { DcrAuthenticator } from '../../../src/dcr/index.ts';
-import { startDcrTestServer } from '../../lib/servers/dcr-test-server.ts';
+import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 describe('integration/dcr-auth', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;

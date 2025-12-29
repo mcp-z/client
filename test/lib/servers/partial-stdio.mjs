@@ -12,23 +12,6 @@
  * NOTE: This is intentionally incomplete - it simulates real-world partial implementations
  */
 
-interface JsonRpcRequest {
-  jsonrpc?: string;
-  method?: string;
-  id?: string | number;
-  params?: unknown;
-}
-
-interface JsonRpcResponse {
-  jsonrpc: string;
-  id: string | number | null;
-  result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-  };
-}
-
 process.stdin.setEncoding('utf8');
 let buffer = '';
 process.stdout.write(''); // ensure pipe is open
@@ -42,10 +25,9 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-process.stdin.on('data', (chunk: string) => {
+process.stdin.on('data', (chunk) => {
   buffer += chunk;
-  let idx: number;
-  idx = buffer.indexOf('\n');
+  let idx = buffer.indexOf('\n');
   while (idx !== -1) {
     const line = buffer.slice(0, idx).trim();
     buffer = buffer.slice(idx + 1);
@@ -54,11 +36,11 @@ process.stdin.on('data', (chunk: string) => {
       continue;
     }
     try {
-      const msg = JSON.parse(line) as JsonRpcRequest;
+      const msg = JSON.parse(line);
 
       if (msg.method === 'initialize') {
         // Handle MCP initialization - declare only tools capability
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -73,7 +55,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'tools/list') {
         // Implement tools/list - this server HAS tools
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -90,7 +72,7 @@ process.stdin.on('data', (chunk: string) => {
       } else if (msg.method === 'resources/list' || msg.method === 'prompts/list') {
         // Return JSON-RPC "Method not found" error for unimplemented methods
         // This mimics third-party servers like Todoist that don't implement these
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           error: {
@@ -101,7 +83,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.id !== undefined) {
         // Unknown method
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id,
           error: {
@@ -112,7 +94,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       }
     } catch (_e) {
-      const errorResponse: JsonRpcResponse = {
+      const errorResponse = {
         jsonrpc: '2.0',
         id: null,
         error: { code: -32700, message: 'parse error' },
@@ -122,6 +104,3 @@ process.stdin.on('data', (chunk: string) => {
     idx = buffer.indexOf('\n');
   }
 });
-
-// Make this file a module to avoid global scope conflicts
-export {};

@@ -4,27 +4,12 @@
  */
 
 import express from 'express';
-import type { Server } from 'http';
-
-export interface DcrTestServerConfig {
-  /** Port to run server on */
-  port: number;
-  /** Base URL for OAuth endpoints */
-  baseUrl: string;
-}
-
-export interface DcrTestServerResult {
-  /** Base URL of the server */
-  url: string;
-  /** Cleanup function to stop the server */
-  close: () => Promise<void>;
-}
 
 /**
  * Start a simple DCR test server for integration testing
  * Implements minimal OAuth/DCR endpoints needed for testing
  */
-export async function startDcrTestServer(config: DcrTestServerConfig): Promise<DcrTestServerResult> {
+export async function startDcrTestServer(config) {
   const { port, baseUrl } = config;
 
   // Create Express app
@@ -32,8 +17,8 @@ export async function startDcrTestServer(config: DcrTestServerConfig): Promise<D
   app.use(express.json());
 
   // In-memory storage for registered clients
-  const clients = new Map<string, { clientId: string; clientSecret: string; redirectUris: string[] }>();
-  const authCodes = new Map<string, { clientId: string; redirectUri: string }>();
+  const clients = new Map();
+  const authCodes = new Map();
 
   // .well-known/oauth-authorization-server endpoint (RFC 8414)
   app.get('/.well-known/oauth-authorization-server', (_req, res) => {
@@ -97,7 +82,9 @@ export async function startDcrTestServer(config: DcrTestServerConfig): Promise<D
     const { client_id, redirect_uri } = req.query;
 
     // Validate client
-    const client = clients.get(client_id as string);
+    const clientId = String(client_id ?? '');
+    const redirectUri = String(redirect_uri ?? '');
+    const client = clients.get(clientId);
     if (!client) {
       res.status(400).send('Invalid client_id');
       return;
@@ -106,12 +93,12 @@ export async function startDcrTestServer(config: DcrTestServerConfig): Promise<D
     // Auto-approve for testing (generate auth code)
     const authCode = `code_${Math.random().toString(36).substring(2)}`;
     authCodes.set(authCode, {
-      clientId: client_id as string,
-      redirectUri: redirect_uri as string,
+      clientId,
+      redirectUri,
     });
 
     // Redirect back to client with auth code
-    const redirectUrl = new URL(redirect_uri as string);
+    const redirectUrl = new URL(redirectUri);
     redirectUrl.searchParams.set('code', authCode);
     res.redirect(redirectUrl.toString());
   });
@@ -159,7 +146,7 @@ export async function startDcrTestServer(config: DcrTestServerConfig): Promise<D
   });
 
   // Start HTTP server with keep-alive disabled for clean test shutdown
-  const httpServer: Server = await new Promise((resolve) => {
+  const httpServer = await new Promise((resolve) => {
     const server = app.listen(port, () => {
       console.log(`🔧 DCR Test Server listening on ${baseUrl}`);
       console.log(`   RFC 8414: ${baseUrl}/.well-known/oauth-authorization-server`);
@@ -177,7 +164,7 @@ export async function startDcrTestServer(config: DcrTestServerConfig): Promise<D
     close: async () => {
       // Force close all connections immediately
       httpServer.closeAllConnections();
-      return new Promise<void>((resolve) => {
+      return new Promise((resolve) => {
         httpServer.close(() => {
           resolve();
         });

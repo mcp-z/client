@@ -20,7 +20,7 @@ describe('StdioClientTransport close() behavior (SDK fix verification)', () => {
     // Spawn a simple process that exits on stdin close
     const transport = new StdioClientTransport({
       command: 'node',
-      args: ['test/lib/servers/minimal-stdio.ts'],
+      args: ['test/lib/servers/minimal-stdio.mjs'],
     });
 
     await transport.start();
@@ -101,7 +101,7 @@ describe('StdioClientTransport close() behavior (SDK fix verification)', () => {
   it('should not leave zombie processes', async () => {
     const transport = new StdioClientTransport({
       command: 'node',
-      args: ['test/lib/servers/minimal-stdio.ts'],
+      args: ['test/lib/servers/minimal-stdio.mjs'],
     });
 
     await transport.start();

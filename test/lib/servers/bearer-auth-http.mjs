@@ -8,7 +8,7 @@
  * - Full MCP SDK (McpServer, StreamableHTTPServerTransport)
  * - Bearer token validation middleware with 401/403 error responses
  * - Configurable valid tokens via CLI --token arg or VALID_TOKENS env var
- * - Echo tool/resource/prompt (same as echo-http.ts for test consistency)
+ * - Echo tool/resource/prompt (same as echo-http.mjs for test consistency)
  * - Token validation logging for debugging
  * - Graceful shutdown on SIGINT/SIGTERM
  *
@@ -19,8 +19,8 @@
  * - Validates token against configured valid tokens list
  *
  * USAGE:
- *   node test/lib/servers/bearer-auth-http.ts --port 3000 --token "test-token-123"
- *   VALID_TOKENS="token1,token2" node test/lib/servers/bearer-auth-http.ts
+ *   node test/lib/servers/bearer-auth-http.mjs --port 3000 --token "test-token-123"
+ *   VALID_TOKENS="token1,token2" node test/lib/servers/bearer-auth-http.mjs
  *
  * CONFIGURATION:
  *   --port <number>           Server port (default: 50300)
@@ -31,7 +31,6 @@
 
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { NextFunction, Request, Response } from 'express';
 import express from 'express';
 import { parseArgs } from 'util';
 import { z } from 'zod';
@@ -51,7 +50,7 @@ function parseConfig() {
   });
 
   // Build valid tokens set from CLI arg or env var
-  const validTokens = new Set<string>();
+  const validTokens = new Set();
 
   // Priority 1: CLI --token argument
   if (values.token) {
@@ -86,8 +85,8 @@ function parseConfig() {
  * Returns 403 if bearer token is invalid
  * Passes through if token is valid
  */
-function createBearerAuthMiddleware(validTokens: Set<string>) {
-  return (req: Request, res: Response, next: NextFunction) => {
+function createBearerAuthMiddleware(validTokens) {
+  return (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     // Check for Authorization header
@@ -148,7 +147,7 @@ async function main() {
     version: '1.0.0',
   });
 
-  // Register echo tool (same as echo-http.ts for test consistency)
+  // Register echo tool (same as echo-http.mjs for test consistency)
   server.registerTool(
     'echo',
     {
@@ -166,7 +165,7 @@ async function main() {
     }
   );
 
-  // Register echo resource (same as echo-http.ts)
+  // Register echo resource (same as echo-http.mjs)
   server.registerResource(
     'echo',
     new ResourceTemplate('echo://{message}', {
@@ -188,7 +187,7 @@ async function main() {
     })
   );
 
-  // Register echo prompt (same as echo-http.ts)
+  // Register echo prompt (same as echo-http.mjs)
   server.registerPrompt(
     'echo',
     {
@@ -199,9 +198,9 @@ async function main() {
     (args) => ({
       messages: [
         {
-          role: 'user' as const,
+          role: 'user',
           content: {
-            type: 'text' as const,
+            type: 'text',
             text: `Please process this message: ${args.message}`,
           },
         },
@@ -259,7 +258,7 @@ async function main() {
   });
 
   // Handle startup failures (port already in use, etc.)
-  httpServer.on('error', (error: NodeJS.ErrnoException) => {
+  httpServer.on('error', (error) => {
     console.error(`[bearer-auth-http] FATAL: Failed to start server on port ${config.port}:`, error.message);
     if (error.code === 'EADDRINUSE') {
       console.error(`[bearer-auth-http] FATAL: Port ${config.port} is already in use`);

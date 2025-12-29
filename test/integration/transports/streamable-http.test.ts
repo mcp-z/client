@@ -41,7 +41,7 @@ describe('http transport', () => {
         url,
         start: {
           command: 'node',
-          args: ['test/lib/servers/echo-http.ts', '--port', String(port)],
+          args: ['test/lib/servers/echo-http.mjs', '--port', String(port)],
         },
       },
     };

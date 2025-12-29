@@ -4,7 +4,10 @@
 
 import assert from 'assert';
 import * as path from 'path';
+import * as url from 'url';
 import { createServerRegistry, type ServerRegistry } from '../../../src/spawn/spawn-servers.ts';
+
+const __dirname = path.dirname(typeof __filename !== 'undefined' ? __filename : url.fileURLToPath(import.meta.url));
 
 describe('createServerRegistry + connect', () => {
   const registries: ServerRegistry[] = [];
@@ -24,7 +27,7 @@ describe('createServerRegistry + connect', () => {
     const registry = createServerRegistry({
       'test-server': {
         command: 'node',
-        args: ['test/lib/servers/minimal-stdio.ts'],
+        args: ['test/lib/servers/minimal-stdio.mjs'],
       },
     });
     registries.push(registry);
@@ -48,7 +51,7 @@ describe('createServerRegistry + connect', () => {
     const registry = createServerRegistry({
       'test-server': {
         command: 'node',
-        args: ['test/lib/servers/minimal-stdio.ts'],
+        args: ['test/lib/servers/minimal-stdio.mjs'],
         env: {
           CUSTOM_VAR: 'test-value',
           LOG_LEVEL: 'error',
@@ -74,10 +77,10 @@ describe('createServerRegistry + connect', () => {
       {
         'test-server': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
-      { cwd: path.resolve(import.meta.dirname, '../../..') } // Project root
+      { cwd: path.resolve(__dirname, '../../..') } // Project root
     );
     registries.push(registry);
 
@@ -92,7 +95,7 @@ describe('createServerRegistry + connect', () => {
     const registry = createServerRegistry({
       'test-server': {
         command: 'node',
-        args: ['test/lib/servers/minimal-stdio.ts'],
+        args: ['test/lib/servers/minimal-stdio.mjs'],
       },
     });
     registries.push(registry);

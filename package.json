@@ -71,7 +71,6 @@
     "module-root-sync": "^2.0.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.0.2",
     "dotenv": "^17.2.3",
@@ -84,7 +83,7 @@
     "zod": "^4.0.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "tsds": {
     "source": "src/index.ts"

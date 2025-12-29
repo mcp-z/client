@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * MCP SDK stdio server for relative path resolution testing
+ * Full MCP SDK stdio test server
  *
- * PURPOSE: Test that spawn-cluster correctly resolves relative paths with cwd
+ * PURPOSE: Demonstrates complete MCP server with stdio transport
  * FEATURES:
  * - Full MCP SDK (McpServer, StdioServerTransport)
- * - Standard echo tool/resource/prompt for verification
- * - Used to validate path resolution in spawn-cluster
+ * - Echo tool with JSON-structured responses
+ * - Echo resource for URI-based access
+ * - Echo prompt for message processing
+ * - Process-based communication (stdin/stdout)
+ * - Graceful shutdown on SIGINT/SIGTERM
  *
- * USAGE: spawn-cluster with cwd parameter and relative path in args
- * VALIDATES: Relative path resolution works correctly
+ * USAGE: node test/lib/servers/echo-stdio.mjs
  */
 
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -18,27 +20,11 @@ import { z } from 'zod';
 
 async function main() {
   const server = new McpServer({
-    name: 'my-local',
+    name: 'echo-stdio',
     version: '1.0.0',
   });
 
-  server.registerResource(
-    'echo',
-    new ResourceTemplate('echo://{message}', { list: undefined }),
-    {
-      title: 'Echo Resource',
-      description: 'Echoes back messages as resources',
-    },
-    async (uri, { message }) => ({
-      contents: [
-        {
-          uri: uri.href,
-          text: `Resource echo: ${message}`,
-        },
-      ],
-    })
-  );
-
+  // Register echo tool with JSON-structured response
   server.registerTool(
     'echo',
     {
@@ -56,19 +42,42 @@ async function main() {
     }
   );
 
+  // Register echo resource (with list descriptor so it shows in listResources())
+  server.registerResource(
+    'echo',
+    new ResourceTemplate('echo://{message}', {
+      list: async () => ({
+        resources: [{ uri: 'echo://{message}', name: 'echo', description: 'Echoes back messages as resources', mimeType: 'text/plain' }],
+      }),
+    }),
+    {
+      title: 'Echo Resource',
+      description: 'Echoes back messages as resources',
+    },
+    async (uri, { message }) => ({
+      contents: [
+        {
+          uri: uri.href,
+          text: `Resource echo: ${message}`,
+        },
+      ],
+    })
+  );
+
+  // Register echo prompt
   server.registerPrompt(
     'echo',
     {
       title: 'Echo Prompt',
       description: 'Creates a prompt to process a message',
-      argsSchema: { message: z.string() } as const,
+      argsSchema: { message: z.string() },
     },
-    (args: { message: string }) => ({
+    (args) => ({
       messages: [
         {
-          role: 'user' as const,
+          role: 'user',
           content: {
-            type: 'text' as const,
+            type: 'text',
             text: `Please process this message: ${args.message}`,
           },
         },
