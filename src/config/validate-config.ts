@@ -26,11 +26,9 @@ let validatorCache: ReturnType<Ajv['compile']> | null = null;
  * Get servers schema (loads once from bundled file, then caches)
  */
 function getSchema(): object {
-  if (schemaCache) {
-    return schemaCache;
-  }
+  if (schemaCache) return schemaCache;
 
-  const schemaPath = path.join(packageRoot, 'schemas/servers.schema.json');
+  const schemaPath = path.join(packageRoot, './schemas/servers.schema.json');
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Servers schema not found at: ${schemaPath}`);
   }
@@ -43,9 +41,7 @@ function getSchema(): object {
  * Get compiled AJV validator (creates once, then caches)
  */
 function getValidator(): ReturnType<Ajv['compile']> {
-  if (validatorCache) {
-    return validatorCache;
-  }
+  if (validatorCache) return validatorCache;
 
   const schema = getSchema();
   const ajv = new Ajv({
