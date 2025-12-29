@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcpeasy.dev/schemas/servers.schema.json",
+  "title": "MCP Servers",
+  "description": "Map of server names to their configurations. Compatible with Claude Code mcpServers and VS Code servers formats.",
+  "type": "object",
+  "additionalProperties": {
+    "$ref": "#/definitions/McpServerEntry"
+  },
+  "definitions": {
+    "McpServerEntry": {
+      "type": "object",
+      "description": "Configuration for a single MCP server. Transport type is determined by the 'type' field (defaults to 'stdio').",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["stdio", "http", "sse-ide", "ws-ide", "sdk"],
+          "description": "Transport type. Defaults to 'stdio' if omitted."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command to execute (stdio transport)"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command arguments (stdio transport)"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Server URL (http, sse-ide, ws-ide transports)"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "HTTP headers (http transport)"
+        },
+        "headersHelper": {
+          "type": "string",
+          "description": "Helper command for dynamic header generation (http transport)"
+        },
+        "ideName": {
+          "type": "string",
+          "description": "IDE identifier (sse-ide, ws-ide transports)"
+        },
+        "authToken": {
+          "type": "string",
+          "description": "Authentication token (ws-ide transport)"
+        },
+        "ideRunningInWindows": {
+          "type": "boolean",
+          "description": "Whether IDE is running on Windows (sse-ide, ws-ide transports)"
+        },
+        "name": {
+          "type": "string",
+          "description": "SDK name identifier (sdk transport)"
+        },
+        "start": {
+          "$ref": "#/definitions/StartConfig",
+          "description": "MCP-Z extension: Auto-start configuration for HTTP servers"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StartConfig": {
+      "type": "object",
+      "description": "MCP-Z extension: Configuration for auto-starting HTTP servers",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command to start the server"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command arguments"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory"
+        }
+      },
+      "required": ["command"],
+      "additionalProperties": false
+    }
+  }
+}
