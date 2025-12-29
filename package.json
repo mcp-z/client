@@ -63,12 +63,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1",
+    "ajv": "^8.0.0",
+    "ajv-formats": "^3.0.0",
     "get-port": "^7.1.0",
     "keyv": "^5.5.5",
     "keyv-file": "^5.3.3",
-    "module-root-sync": "^2.0.2"
+    "module-root-sync": "^2.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
