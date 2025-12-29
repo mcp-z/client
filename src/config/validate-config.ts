@@ -1,13 +1,13 @@
 import { Ajv, type ErrorObject } from 'ajv';
+import addFormats from 'ajv-formats';
 import * as fs from 'fs';
-import { createRequire } from 'module';
 import moduleRoot from 'module-root-sync';
 import * as path from 'path';
+import * as url from 'url';
 
 // Import ajv-formats (CommonJS module - use createRequire for ESM compatibility)
-const require = createRequire(import.meta.url);
-const addFormats = require('ajv-formats');
-const packageRoot = moduleRoot(import.meta.filename);
+const __dirname = path.dirname(typeof __filename !== 'undefined' ? __filename : url.fileURLToPath(import.meta.url));
+const packageRoot = moduleRoot(__dirname);
 
 /**
  * Validation result for servers configuration

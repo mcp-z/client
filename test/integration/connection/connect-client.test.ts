@@ -30,11 +30,11 @@ describe('registry.connect', () => {
     serversConfig = {
       'test-stdio-1': {
         command: 'node',
-        args: ['test/lib/servers/echo-stdio.ts'],
+        args: ['test/lib/servers/echo-stdio.mjs'],
       },
       'test-stdio-2': {
         command: 'node',
-        args: ['test/lib/servers/echo-stdio.ts'],
+        args: ['test/lib/servers/echo-stdio.mjs'],
       },
     };
 

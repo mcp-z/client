@@ -9,7 +9,7 @@ describe('ServerRegistry searchCapabilities', () => {
     const config: ServersConfig = {
       'echo-server': {
         command: 'node',
-        args: ['test/lib/servers/echo-stdio.ts'],
+        args: ['test/lib/servers/echo-stdio.mjs'],
       },
     };
     registry = createServerRegistry(config, { cwd: process.cwd() });

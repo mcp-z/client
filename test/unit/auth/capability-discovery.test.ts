@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { probeAuthCapabilities } from '../../../src/auth/capability-discovery.ts';
-import { startDcrTestServer } from '../../lib/servers/dcr-test-server.ts';
+import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 describe('unit/auth/capability-discovery', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;

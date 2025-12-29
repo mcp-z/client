@@ -5,7 +5,7 @@ This directory contains MCP test servers for testing @mcp-z/cli functionality. E
 
 ## Server Overview
 
-### echo-stdio.ts
+### echo-stdio.mjs
 **Purpose**: Full MCP SDK demonstration with stdio transport
 **Transport**: stdin/stdout process communication
 **Features**:
@@ -16,7 +16,7 @@ This directory contains MCP test servers for testing @mcp-z/cli functionality. E
 
 **Usage**:
 ```bash
-node test/lib/servers/echo-stdio.ts
+node test/lib/servers/echo-stdio.mjs
 ```
 
 **Example Config**:
@@ -26,7 +26,7 @@ node test/lib/servers/echo-stdio.ts
     "my-stdio-server": {
       "type": "stdio",
       "command": "node",
-      "args": ["path/to/echo-stdio.ts"]
+      "args": ["path/to/echo-stdio.mjs"]
     }
   }
 }
@@ -34,7 +34,7 @@ node test/lib/servers/echo-stdio.ts
 
 ---
 
-### echo-http.ts
+### echo-http.mjs
 **Purpose**: Full MCP SDK demonstration with http transport
 **Transport**: HTTP with Server-Sent Events (SSE)
 **Features**:
@@ -45,7 +45,7 @@ node test/lib/servers/echo-stdio.ts
 
 **Usage**:
 ```bash
-node test/lib/servers/echo-http.ts --port 3000
+node test/lib/servers/echo-http.mjs --port 3000
 ```
 
 **Example Config**:
@@ -62,7 +62,7 @@ node test/lib/servers/echo-http.ts --port 3000
 
 ---
 
-### minimal-stdio.ts
+### minimal-stdio.mjs
 **Purpose**: Minimal hand-rolled JSON-RPC implementation for low-level testing
 **Transport**: stdin/stdout process communication
 **Features**:
@@ -72,14 +72,14 @@ node test/lib/servers/echo-http.ts --port 3000
 
 **Usage**:
 ```bash
-node test/lib/servers/minimal-stdio.ts
+node test/lib/servers/minimal-stdio.mjs
 ```
 
 **When to use**: Low-level tests that need to verify stdio connection logic without MCP SDK overhead.
 
 ---
 
-### pathtest-stdio.ts
+### pathtest-stdio.mjs
 **Purpose**: Validate relative path resolution in spawn-cluster
 **Transport**: stdin/stdout process communication
 **Features**:
@@ -92,7 +92,7 @@ spawnCluster({
   mcpServers: {
     'test': {
       command: 'node',
-      args: ['servers/pathtest-stdio.ts']  // Relative path
+      args: ['servers/pathtest-stdio.mjs']  // Relative path
     }
   }
 }, { cwd: 'test/lib' });  // Working directory for resolution
@@ -102,7 +102,7 @@ spawnCluster({
 
 ## Naming Convention
 
-All servers follow the pattern: `{purpose}-{transport}.ts`
+All servers follow the pattern: `{purpose}-{transport}.mjs`
 
 - **Purpose**: What the server demonstrates (echo, minimal, pathtest)
 - **Transport**: How it communicates (stdio, http)
@@ -136,7 +136,7 @@ This format is used by `client.callTool()` and tests that parse tool responses.
 ### Server Won't Start
 - Check port is not already in use: `lsof -i :PORT`
 - Verify Node.js version >= 24 (native TypeScript support)
-- Run with explicit port: `node echo-http.ts --port 3001`
+- Run with explicit port: `node echo-http.mjs --port 3001`
 
 ### Connection Timeouts
 - Verify server is actually listening (check console output)
@@ -146,7 +146,7 @@ This format is used by `client.callTool()` and tests that parse tool responses.
 ### Protocol Errors
 - Verify client and server use same MCP SDK version
 - Check initialize handshake completes (client.connect() resolves)
-- Use minimal-stdio.ts to isolate MCP SDK issues
+- Use minimal-stdio.mjs to isolate MCP SDK issues
 
 ## Transport Inference
 

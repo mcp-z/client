@@ -10,7 +10,7 @@ describe('ManagedClient helper overloads', () => {
     registry = createServerRegistry({
       'test-server': {
         command: 'node',
-        args: ['test/lib/servers/minimal-stdio.ts'],
+        args: ['test/lib/servers/minimal-stdio.mjs'],
       },
     });
     client = await registry.connect('test-server');

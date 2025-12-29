@@ -26,11 +26,11 @@ describe('ExistingProcessTransport', () => {
     const serversConfig: ServersConfig = {
       'test-server-1': {
         command: 'node',
-        args: [path.join(testCwd, 'test/lib/servers/echo-stdio.ts')],
+        args: [path.join(testCwd, 'test/lib/servers/echo-stdio.mjs')],
       },
       'test-server-2': {
         command: 'node',
-        args: [path.join(testCwd, 'test/lib/servers/minimal-stdio.ts')],
+        args: [path.join(testCwd, 'test/lib/servers/minimal-stdio.mjs')],
       },
     };
 

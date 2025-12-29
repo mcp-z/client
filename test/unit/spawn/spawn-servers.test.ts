@@ -27,7 +27,7 @@ describe('createServerRegistry', () => {
       {
         'my-stdio': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot }
@@ -54,11 +54,11 @@ describe('createServerRegistry', () => {
       {
         'server-1': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
         'server-2': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot }
@@ -80,7 +80,7 @@ describe('createServerRegistry', () => {
 
   it('should resolve paths relative to cwd', async () => {
     // Use test file location to construct absolute path to server
-    const serverPath = path.join(__dirname, '../../lib/servers/pathtest-echo-stdio.ts');
+    const serverPath = path.join(__dirname, '../../lib/servers/pathtest-echo-stdio.mjs');
 
     registry = createServerRegistry(
       {
@@ -105,7 +105,7 @@ describe('createServerRegistry', () => {
       {
         'my-stdio': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
           env: {
             TEST_VAR: 'test-value',
             CUSTOM_PORT: '9999',
@@ -129,7 +129,7 @@ describe('createServerRegistry', () => {
       {
         'my-stdio': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot }
@@ -195,7 +195,7 @@ describe('createServerRegistry', () => {
       {
         'my-stdio': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot }
@@ -219,11 +219,11 @@ describe('createServerRegistry', () => {
       {
         'server-1': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
         'server-2': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot }
@@ -251,7 +251,7 @@ describe('createServerRegistry', () => {
       {
         'stdio-server': {
           command: 'node',
-          args: ['test/lib/servers/minimal-stdio.ts'],
+          args: ['test/lib/servers/minimal-stdio.mjs'],
         },
       },
       { cwd: projectRoot, dialects: ['servers'] }

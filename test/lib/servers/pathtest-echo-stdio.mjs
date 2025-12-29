@@ -61,14 +61,14 @@ async function main() {
     {
       title: 'Echo Prompt',
       description: 'Creates a prompt to process a message',
-      argsSchema: { message: z.string() } as const,
+      argsSchema: { message: z.string() },
     },
-    (args: { message: string }) => ({
+    (args) => ({
       messages: [
         {
-          role: 'user' as const,
+          role: 'user',
           content: {
-            type: 'text' as const,
+            type: 'text',
             text: `Please process this message: ${args.message}`,
           },
         },

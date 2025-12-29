@@ -44,7 +44,7 @@ describe('bearer auth http transport', () => {
         },
         start: {
           command: 'node',
-          args: ['test/lib/servers/bearer-auth-http.ts', '--port', String(port), '--token', validToken],
+          args: ['test/lib/servers/bearer-auth-http.mjs', '--port', String(port), '--token', validToken],
         },
       },
     };
@@ -249,7 +249,7 @@ describe('bearer auth http transport', () => {
         },
         start: {
           command: 'node',
-          args: ['test/lib/servers/bearer-auth-http.ts', '--port', String(port2), '--token', validToken],
+          args: ['test/lib/servers/bearer-auth-http.mjs', '--port', String(port2), '--token', validToken],
         },
       },
     };

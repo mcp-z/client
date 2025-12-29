@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { DynamicClientRegistrar } from '../../../src/dcr/dynamic-client-registrar.ts';
-import { startDcrTestServer } from '../../lib/servers/dcr-test-server.ts';
+import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 describe('unit/auth/dynamic-client-registrar', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;

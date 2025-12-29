@@ -14,23 +14,6 @@
  * NOTE: This is NOT a full MCP implementation - it's a minimal JSON-RPC stub
  */
 
-interface JsonRpcRequest {
-  jsonrpc?: string;
-  method?: string;
-  id?: string | number;
-  params?: unknown;
-}
-
-interface JsonRpcResponse {
-  jsonrpc: string;
-  id: string | number | null;
-  result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-  };
-}
-
 process.stdin.setEncoding('utf8');
 let buffer = '';
 process.stdout.write(''); // ensure pipe is open
@@ -44,11 +27,10 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-process.stdin.on('data', (chunk: string) => {
+process.stdin.on('data', (chunk) => {
   buffer += chunk;
   // naive line split; real MCP uses JSON-RPC with stream framing.
-  let idx: number;
-  idx = buffer.indexOf('\n');
+  let idx = buffer.indexOf('\n');
   while (idx !== -1) {
     const line = buffer.slice(0, idx).trim();
     buffer = buffer.slice(idx + 1);
@@ -57,11 +39,11 @@ process.stdin.on('data', (chunk: string) => {
       continue;
     }
     try {
-      const msg = JSON.parse(line) as JsonRpcRequest;
+      const msg = JSON.parse(line);
       // Respond minimally to show the bridge works.
       if (msg.method === 'initialize') {
         // Handle MCP initialization handshake
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -76,7 +58,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'tools/list') {
         // Handle MCP tools/list request
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -117,7 +99,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'resources/list') {
         // Handle MCP resources/list request
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -134,9 +116,9 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'resources/read') {
         // Handle MCP resources/read request
-        const params = msg.params as { uri?: string } | undefined;
+        const params = msg.params ?? {};
         const uri = params?.uri || 'unknown';
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -152,7 +134,7 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'prompts/list') {
         // Handle MCP prompts/list request
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -174,10 +156,10 @@ process.stdin.on('data', (chunk: string) => {
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'prompts/get') {
         // Handle MCP prompts/get request
-        const params = msg.params as { name?: string; arguments?: Record<string, string> } | undefined;
+        const params = msg.params ?? {};
         const promptName = params?.name || 'unknown';
         const args = params?.arguments || {};
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -197,10 +179,10 @@ process.stdin.on('data', (chunk: string) => {
       } else if (msg.method === 'tools/call') {
         // Handle MCP tools/call request
         // Real MCP tools return: { type: 'text', text: JSON }
-        const params = msg.params as { name?: string } | undefined;
+        const params = msg.params ?? {};
         const toolName = params?.name || 'unknown';
         const resultData = toolName === 'ping' ? { result: 'pong' } : { result: { ok: true } };
-        const response: JsonRpcResponse = {
+        const response = {
           jsonrpc: '2.0',
           id: msg.id ?? null,
           result: {
@@ -214,14 +196,14 @@ process.stdin.on('data', (chunk: string) => {
         };
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.method === 'ping') {
-        const response: JsonRpcResponse = { jsonrpc: '2.0', id: msg.id ?? null, result: 'pong' };
+        const response = { jsonrpc: '2.0', id: msg.id ?? null, result: 'pong' };
         process.stdout.write(`${JSON.stringify(response)}\n`);
       } else if (msg.id !== undefined) {
-        const response: JsonRpcResponse = { jsonrpc: '2.0', id: msg.id, result: { ok: true } };
+        const response = { jsonrpc: '2.0', id: msg.id, result: { ok: true } };
         process.stdout.write(`${JSON.stringify(response)}\n`);
       }
     } catch (_e) {
-      const errorResponse: JsonRpcResponse = {
+      const errorResponse = {
         jsonrpc: '2.0',
         id: null,
         error: { code: -32700, message: 'parse error' },
@@ -231,6 +213,3 @@ process.stdin.on('data', (chunk: string) => {
     idx = buffer.indexOf('\n');
   }
 });
-
-// Make this file a module to avoid global scope conflicts
-export {};
