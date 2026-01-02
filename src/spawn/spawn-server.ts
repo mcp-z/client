@@ -129,6 +129,12 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
   const spawnOpts: SpawnOptions = { cwd, env, stdio, shell };
   const child = spawn(command, args, spawnOpts);
 
+  // Pipe stdio if not inherited
+  if (child.stderr)
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+    });
+
   // Attach lifecycle logging
   child.on('exit', (code, sig) => logger.info(`[${name}] exited (code=${code}, signal=${sig || 'none'})`));
   child.on('error', (err) => logger.info(`[${name}] process error: ${err.message}`));

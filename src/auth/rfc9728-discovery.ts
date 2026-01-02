@@ -56,6 +56,9 @@ function getPath(url: string): string {
  */
 export async function discoverProtectedResourceMetadata(resourceUrl: string): Promise<ProtectedResourceMetadata | null> {
   try {
+    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(resourceUrl);
+    if (headerMetadata) return headerMetadata;
+
     const origin = getOrigin(resourceUrl);
     const path = getPath(resourceUrl);
 
@@ -136,6 +139,44 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
   }
 }
 
+async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string): Promise<ProtectedResourceMetadata | null> {
+  try {
+    const response = await fetch(resourceUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+    });
+
+    let header = response.headers.get('www-authenticate');
+    if (!header) {
+      const postResponse = await fetch(resourceUrl, {
+        method: 'POST',
+        headers: { Accept: 'application/json', Connection: 'close', 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      header = postResponse.headers.get('www-authenticate');
+    }
+
+    if (!header) return null;
+
+    const match = header.match(/resource_metadata="([^"]+)"/i);
+    if (!match || !match[1]) return null;
+
+    const metadataUrl = match[1];
+    const metadataResponse = await fetch(metadataUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+    });
+
+    if (!metadataResponse.ok) {
+      return null;
+    }
+
+    return (await metadataResponse.json()) as ProtectedResourceMetadata;
+  } catch (_error) {
+    return null;
+  }
+}
+
 /**
  * Discover OAuth 2.0 Authorization Server Metadata (RFC 8414)
  * Probes .well-known/oauth-authorization-server endpoint
@@ -162,6 +203,31 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string)
     }
 
     return (await response.json()) as AuthorizationServerMetadata;
+  } catch (_error) {
+    return null;
+  }
+}
+
+/**
+ * Discover OAuth Authorization Server Issuer from resource response (RFC 9207)
+ *
+ * @param resourceUrl - URL of the protected resource
+ * @returns Issuer URL if present in WWW-Authenticate header, null otherwise
+ */
+export async function discoverAuthorizationServerIssuer(resourceUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(resourceUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+    });
+
+    const header = response.headers.get('www-authenticate');
+    if (!header) return null;
+
+    const match = header.match(/(?:authorization_server|issuer)="([^"]+)"/i);
+    if (!match) return null;
+
+    return match[1] ?? null;
   } catch (_error) {
     return null;
   }

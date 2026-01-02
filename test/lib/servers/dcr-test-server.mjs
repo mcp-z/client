@@ -10,7 +10,7 @@ import express from 'express';
  * Implements minimal OAuth/DCR endpoints needed for testing
  */
 export async function startDcrTestServer(config) {
-  const { port, baseUrl } = config;
+  const { port, baseUrl, wwwAuthenticateResourceMetadata } = config;
 
   // Create Express app
   const app = express();
@@ -49,6 +49,16 @@ export async function startDcrTestServer(config) {
       authorization_servers: [baseUrl],
       scopes_supported: ['read', 'write'],
     });
+  });
+
+  app.get('/mcp', (_req, res) => {
+    if (!wwwAuthenticateResourceMetadata) {
+      res.status(404).send('Not Found');
+      return;
+    }
+
+    res.set('WWW-Authenticate', `Bearer resource_metadata="${wwwAuthenticateResourceMetadata}"`);
+    res.status(401).send('Unauthorized');
   });
 
   // DCR registration endpoint (RFC 7591)

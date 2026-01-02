@@ -4,6 +4,7 @@
  */
 
 import assert from 'assert';
+import getPort from 'get-port';
 import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from '../../../src/auth/rfc9728-discovery.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
@@ -66,6 +67,26 @@ describe('unit/auth/rfc9728-discovery', () => {
       // Should find metadata at origin (returns resource: baseUrl)
       assert.strictEqual(metadata?.resource, 'http://localhost:9997');
       assert.deepStrictEqual(metadata?.authorization_servers, ['http://localhost:9997']);
+    });
+
+    it('should follow resource_metadata from WWW-Authenticate header', async () => {
+      const port = await getPort();
+      const baseUrl = `http://localhost:${port}`;
+      const server = await startDcrTestServer({
+        port,
+        baseUrl,
+        wwwAuthenticateResourceMetadata: `${baseUrl}/.well-known/oauth-protected-resource/mcp`,
+      });
+
+      try {
+        const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/mcp`);
+
+        assert.strictEqual(metadata?.resource, `${baseUrl}/mcp`);
+        assert.deepStrictEqual(metadata?.authorization_servers, [baseUrl]);
+        assert.deepStrictEqual(metadata?.scopes_supported, ['read', 'write']);
+      } finally {
+        await server.close();
+      }
     });
   });
 
