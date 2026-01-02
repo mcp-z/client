@@ -3,8 +3,8 @@
  * Probes RFC 9728 (Protected Resource) and RFC 8414 (Authorization Server) metadata
  */
 
-import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from './rfc9728-discovery.ts';
-import type { AuthCapabilities } from './types.ts';
+import { discoverAuthorizationServerIssuer, discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from './rfc9728-discovery.ts';
+import type { AuthCapabilities, AuthorizationServerMetadata } from './types.ts';
 
 /**
  * Extract origin (protocol + host) from a URL
@@ -43,6 +43,36 @@ function getOrigin(url: string): string {
  *   console.log('Registration endpoint:', caps.registrationEndpoint);
  * }
  */
+function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: string[]): AuthCapabilities {
+  const supportsDcr = !!metadata.registration_endpoint;
+  const capabilities: AuthCapabilities = { supportsDcr };
+
+  if (metadata.registration_endpoint) {
+    capabilities.registrationEndpoint = metadata.registration_endpoint;
+  }
+  if (metadata.authorization_endpoint) {
+    capabilities.authorizationEndpoint = metadata.authorization_endpoint;
+  }
+  if (metadata.token_endpoint) capabilities.tokenEndpoint = metadata.token_endpoint;
+  if (metadata.introspection_endpoint) {
+    capabilities.introspectionEndpoint = metadata.introspection_endpoint;
+  }
+
+  if (scopes && scopes.length > 0) {
+    capabilities.scopes = scopes;
+  } else if (metadata.scopes_supported) {
+    capabilities.scopes = metadata.scopes_supported;
+  }
+
+  return capabilities;
+}
+
+async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes?: string[]): Promise<AuthCapabilities | null> {
+  const metadata = await discoverAuthorizationServerMetadata(authServerUrl);
+  if (!metadata) return null;
+  return buildCapabilities(metadata, scopes);
+}
+
 export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabilities> {
   try {
     // Strategy 1: Try RFC 9728 Protected Resource Metadata discovery
@@ -57,55 +87,29 @@ export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabi
         // Array has length > 0 but first element is undefined/null - skip this path
         return { supportsDcr: false };
       }
-      const authServerMetadata = await discoverAuthorizationServerMetadata(authServerUrl);
-
-      if (authServerMetadata) {
-        // Successfully discovered full OAuth metadata via RFC 9728 → RFC 8414 chain
-        const supportsDcr = !!authServerMetadata.registration_endpoint;
-        const capabilities: AuthCapabilities = { supportsDcr };
-
-        if (authServerMetadata.registration_endpoint) {
-          capabilities.registrationEndpoint = authServerMetadata.registration_endpoint;
-        }
-        if (authServerMetadata.authorization_endpoint) {
-          capabilities.authorizationEndpoint = authServerMetadata.authorization_endpoint;
-        }
-        if (authServerMetadata.token_endpoint) capabilities.tokenEndpoint = authServerMetadata.token_endpoint;
-        if (authServerMetadata.introspection_endpoint) {
-          capabilities.introspectionEndpoint = authServerMetadata.introspection_endpoint;
-        }
-
-        // Prefer resource scopes over auth server scopes
-        const scopes = resourceMetadata.scopes_supported || authServerMetadata.scopes_supported;
-        if (scopes) capabilities.scopes = scopes;
-
+      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported);
+      if (capabilities) {
         return capabilities;
       }
+
+      const issuer = await discoverAuthorizationServerIssuer(baseUrl);
+      if (issuer) {
+        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported);
+        if (issuerCapabilities) return issuerCapabilities;
+      }
+    }
+
+    const issuer = await discoverAuthorizationServerIssuer(baseUrl);
+    if (issuer) {
+      const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer);
+      if (issuerCapabilities) return issuerCapabilities;
     }
 
     // Strategy 2: Fall back to direct RFC 8414 discovery at resource origin
     // This handles same-domain OAuth (traditional setup)
     const origin = getOrigin(baseUrl);
-    const authServerMetadata = await discoverAuthorizationServerMetadata(origin);
-
-    if (authServerMetadata) {
-      const supportsDcr = !!authServerMetadata.registration_endpoint;
-      const capabilities: AuthCapabilities = { supportsDcr };
-
-      if (authServerMetadata.registration_endpoint) {
-        capabilities.registrationEndpoint = authServerMetadata.registration_endpoint;
-      }
-      if (authServerMetadata.authorization_endpoint) {
-        capabilities.authorizationEndpoint = authServerMetadata.authorization_endpoint;
-      }
-      if (authServerMetadata.token_endpoint) capabilities.tokenEndpoint = authServerMetadata.token_endpoint;
-      if (authServerMetadata.introspection_endpoint) {
-        capabilities.introspectionEndpoint = authServerMetadata.introspection_endpoint;
-      }
-      if (authServerMetadata.scopes_supported) capabilities.scopes = authServerMetadata.scopes_supported;
-
-      return capabilities;
-    }
+    const originCapabilities = await resolveCapabilitiesFromAuthorizationServer(origin);
+    if (originCapabilities) return originCapabilities;
 
     // No OAuth metadata found
     return { supportsDcr: false };
