@@ -52,13 +52,34 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string
 }
 
 /**
- * Extract base URL from MCP server URL
- * @param mcpUrl - Full MCP endpoint URL (e.g., https://example.com/mcp)
- * @returns Base URL (e.g., https://example.com)
+ * Extract the "server base" by removing a trailing `/mcp` path segment if present.
+ * Examples:
+ *  - https://example.com/mcp -> https://example.com
+ *  - https://example.com/sheets/mcp -> https://example.com/sheets
+ *  - https://example.com/sheets/mcp/ -> https://example.com/sheets
+ *  - https://example.com/sheets -> https://example.com/sheets
  */
-function extractBaseUrl(mcpUrl: string): string {
+export function extractBaseUrl(mcpUrl: string): string {
   const url = new URL(mcpUrl);
-  return `${url.protocol}//${url.host}`;
+
+  // Ignore query/hash for base URL purposes
+  url.search = '';
+  url.hash = '';
+
+  // Normalize path segments (removes empty segments from leading/trailing slashes)
+  const segments = url.pathname.split('/').filter(Boolean);
+
+  // If last segment is exactly "mcp", drop it
+  if (segments[segments.length - 1] === 'mcp') {
+    segments.pop();
+  }
+
+  // Rebuild pathname; empty means root
+  url.pathname = segments.length ? `/${segments.join('/')}` : '';
+
+  // Return without trailing slash (except root origin)
+  const out = url.origin + url.pathname;
+  return out === url.origin ? out : out.replace(/\/+$/, '');
 }
 
 /**
