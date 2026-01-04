@@ -3,6 +3,7 @@
  * Probes .well-known/oauth-protected-resource endpoint
  */
 
+import { joinWellKnown, normalizeUrl } from '../lib/url-utils.ts';
 import type { AuthorizationServerMetadata, ProtectedResourceMetadata } from './types.ts';
 
 /**
@@ -39,6 +40,9 @@ function getPath(url: string): string {
 }
 
 /**
+ * Normalize a resource URL by stripping query/hash and trailing slashes.
+ */
+/**
  * Discover OAuth 2.0 Protected Resource Metadata (RFC 9728)
  * Probes .well-known/oauth-protected-resource endpoint
  *
@@ -56,11 +60,26 @@ function getPath(url: string): string {
  */
 export async function discoverProtectedResourceMetadata(resourceUrl: string): Promise<ProtectedResourceMetadata | null> {
   try {
-    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(resourceUrl);
+    const normalizedResourceUrl = normalizeUrl(resourceUrl);
+    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(normalizedResourceUrl);
     if (headerMetadata) return headerMetadata;
 
-    const origin = getOrigin(resourceUrl);
-    const path = getPath(resourceUrl);
+    // Strategy 0: Try path-local well-known (supports path-prefixed deployments like /outlook)
+    const localWellKnownUrl = joinWellKnown(normalizedResourceUrl, '/.well-known/oauth-protected-resource');
+    try {
+      const response = await fetch(localWellKnownUrl, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Connection: 'close' },
+      });
+      if (response.ok) {
+        return (await response.json()) as ProtectedResourceMetadata;
+      }
+    } catch {
+      // Continue to origin-based discovery
+    }
+
+    const origin = getOrigin(normalizedResourceUrl);
+    const path = getPath(normalizedResourceUrl);
 
     // Strategy 1: Try root location (REQUIRED by RFC 9728)
     const rootUrl = `${origin}/.well-known/oauth-protected-resource`;
@@ -74,7 +93,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
       if (response.ok) {
         const metadata = (await response.json()) as ProtectedResourceMetadata;
         // Check if the discovered resource matches what we're looking for
-        if (metadata.resource === resourceUrl) {
+        if (metadata.resource === normalizedResourceUrl) {
           return metadata;
         }
         // If there's no path component, return root metadata
@@ -84,7 +103,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
         }
         // If requested URL starts with metadata.resource, the root metadata applies to sub-paths
         // (e.g., looking for http://example.com/api/v1/mcp, found http://example.com)
-        if (resourceUrl.startsWith(metadata.resource)) {
+        if (normalizedResourceUrl.startsWith(metadata.resource)) {
           // Still try sub-path location to see if there's more specific metadata
           // But save root metadata as fallback
           const rootMetadata = metadata;
@@ -190,7 +209,18 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string):
  */
 export async function discoverAuthorizationServerMetadata(authServerUrl: string): Promise<AuthorizationServerMetadata | null> {
   try {
-    const origin = getOrigin(authServerUrl);
+    const normalizedAuthServerUrl = normalizeUrl(authServerUrl);
+    const localWellKnownUrl = joinWellKnown(normalizedAuthServerUrl, '/.well-known/oauth-authorization-server');
+    const localResponse = await fetch(localWellKnownUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+    });
+
+    if (localResponse.ok) {
+      return (await localResponse.json()) as AuthorizationServerMetadata;
+    }
+
+    const origin = getOrigin(normalizedAuthServerUrl);
     const wellKnownUrl = `${origin}/.well-known/oauth-authorization-server`;
 
     const response = await fetch(wellKnownUrl, {

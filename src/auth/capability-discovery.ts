@@ -3,6 +3,7 @@
  * Probes RFC 9728 (Protected Resource) and RFC 8414 (Authorization Server) metadata
  */
 
+import { normalizeUrl } from '../lib/url-utils.ts';
 import { discoverAuthorizationServerIssuer, discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from './rfc9728-discovery.ts';
 import type { AuthCapabilities, AuthorizationServerMetadata } from './types.ts';
 
@@ -75,9 +76,10 @@ async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string,
 
 export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabilities> {
   try {
+    const normalizedBaseUrl = normalizeUrl(baseUrl);
     // Strategy 1: Try RFC 9728 Protected Resource Metadata discovery
     // This handles cross-domain OAuth (e.g., Todoist: ai.todoist.net/mcp → todoist.com)
-    const resourceMetadata = await discoverProtectedResourceMetadata(baseUrl);
+    const resourceMetadata = await discoverProtectedResourceMetadata(normalizedBaseUrl);
 
     if (resourceMetadata && resourceMetadata.authorization_servers.length > 0) {
       // Found protected resource metadata with authorization servers
@@ -99,7 +101,7 @@ export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabi
       }
     }
 
-    const issuer = await discoverAuthorizationServerIssuer(baseUrl);
+    const issuer = await discoverAuthorizationServerIssuer(normalizedBaseUrl);
     if (issuer) {
       const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer);
       if (issuerCapabilities) return issuerCapabilities;
@@ -107,7 +109,7 @@ export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabi
 
     // Strategy 2: Fall back to direct RFC 8414 discovery at resource origin
     // This handles same-domain OAuth (traditional setup)
-    const origin = getOrigin(baseUrl);
+    const origin = getOrigin(normalizedBaseUrl);
     const originCapabilities = await resolveCapabilitiesFromAuthorizationServer(origin);
     if (originCapabilities) return originCapabilities;
 

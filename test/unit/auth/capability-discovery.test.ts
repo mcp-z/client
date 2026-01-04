@@ -73,5 +73,13 @@ describe('unit/auth/capability-discovery', () => {
       assert.strictEqual(capabilities.supportsDcr, true);
       assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
     });
+
+    it('should ignore query and fragment on MCP endpoint', async () => {
+      const capabilities = await probeAuthCapabilities('http://localhost:9999/mcp?foo=bar#baz');
+
+      assert.strictEqual(capabilities.supportsDcr, true);
+      assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
+      assert.strictEqual(capabilities.authorizationEndpoint, 'http://localhost:9999/oauth/authorize');
+    });
   });
 });
