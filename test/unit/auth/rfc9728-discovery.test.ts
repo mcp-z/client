@@ -4,9 +4,69 @@
  */
 
 import assert from 'assert';
+import express from 'express';
 import getPort from 'get-port';
 import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from '../../../src/auth/rfc9728-discovery.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
+
+async function startPathPrefixedWellKnownServer(config: { port: number; baseUrl: string; prefix: string }) {
+  const { port, baseUrl, prefix } = config;
+  const app = express();
+
+  app.get('/.well-known/oauth-protected-resource', (_req, res) => {
+    res.json({
+      resource: baseUrl,
+      authorization_servers: [baseUrl],
+      scopes_supported: ['read', 'write'],
+    });
+  });
+
+  app.get(`${prefix}/.well-known/oauth-protected-resource`, (_req, res) => {
+    res.json({
+      resource: `${baseUrl}${prefix}`,
+      authorization_servers: [`${baseUrl}${prefix}`],
+      scopes_supported: ['read', 'write'],
+    });
+  });
+
+  app.get('/.well-known/oauth-authorization-server', (_req, res) => {
+    res.json({
+      issuer: baseUrl,
+      authorization_endpoint: `${baseUrl}/oauth/authorize`,
+      token_endpoint: `${baseUrl}/oauth/token`,
+      registration_endpoint: `${baseUrl}/oauth/register`,
+      scopes_supported: ['read', 'write'],
+    });
+  });
+
+  app.get(`${prefix}/.well-known/oauth-authorization-server`, (_req, res) => {
+    res.json({
+      issuer: `${baseUrl}${prefix}`,
+      authorization_endpoint: `${baseUrl}${prefix}/oauth/authorize`,
+      token_endpoint: `${baseUrl}${prefix}/oauth/token`,
+      registration_endpoint: `${baseUrl}${prefix}/oauth/register`,
+      scopes_supported: ['read', 'write'],
+    });
+  });
+
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+    const httpServer = app.listen(port, () => {
+      resolve(httpServer);
+    });
+    httpServer.keepAliveTimeout = 0;
+    httpServer.headersTimeout = 0;
+  });
+
+  return {
+    url: baseUrl,
+    close: async () => {
+      server.closeAllConnections();
+      return new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    },
+  };
+}
 
 describe('unit/auth/rfc9728-discovery', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;
@@ -88,6 +148,44 @@ describe('unit/auth/rfc9728-discovery', () => {
         await server.close();
       }
     });
+
+    it('should prefer path-local well-known for prefixed deployments', async () => {
+      const port = await getPort();
+      const baseUrl = `http://localhost:${port}`;
+      const server = await startPathPrefixedWellKnownServer({
+        port,
+        baseUrl,
+        prefix: '/outlook',
+      });
+
+      try {
+        const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/outlook`);
+
+        assert.strictEqual(metadata?.resource, `${baseUrl}/outlook`);
+        assert.deepStrictEqual(metadata?.authorization_servers, [`${baseUrl}/outlook`]);
+      } finally {
+        await server.close();
+      }
+    });
+
+    it('should ignore query and fragment when probing path-local well-known', async () => {
+      const port = await getPort();
+      const baseUrl = `http://localhost:${port}`;
+      const server = await startPathPrefixedWellKnownServer({
+        port,
+        baseUrl,
+        prefix: '/outlook',
+      });
+
+      try {
+        const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/outlook?foo=bar#baz`);
+
+        assert.strictEqual(metadata?.resource, `${baseUrl}/outlook`);
+        assert.deepStrictEqual(metadata?.authorization_servers, [`${baseUrl}/outlook`]);
+      } finally {
+        await server.close();
+      }
+    });
   });
 
   describe('discoverAuthorizationServerMetadata', () => {
@@ -126,6 +224,25 @@ describe('unit/auth/rfc9728-discovery', () => {
       const metadata = await discoverAuthorizationServerMetadata('not-a-url');
 
       assert.strictEqual(metadata, null);
+    });
+
+    it('should prefer path-local authorization server metadata', async () => {
+      const port = await getPort();
+      const baseUrl = `http://localhost:${port}`;
+      const server = await startPathPrefixedWellKnownServer({
+        port,
+        baseUrl,
+        prefix: '/outlook',
+      });
+
+      try {
+        const metadata = await discoverAuthorizationServerMetadata(`${baseUrl}/outlook`);
+
+        assert.strictEqual(metadata?.issuer, `${baseUrl}/outlook`);
+        assert.strictEqual(metadata?.authorization_endpoint, `${baseUrl}/outlook/oauth/authorize`);
+      } finally {
+        await server.close();
+      }
     });
   });
 });
