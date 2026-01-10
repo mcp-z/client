@@ -14,7 +14,7 @@ import type { ServersConfig } from '../../../src/index.ts';
 // Check if manual mode is enabled (for OAuth flow tests only)
 const MANUAL_MODE = process.env.TEST_INCLUDE_MANUAL === 'true';
 
-describe.skip('integration/auth/todoist-oauth', () => {
+describe('integration/auth/todoist-oauth', () => {
   // Discovery tests - no manual mode needed (just HTTP calls)
   describe('Discovery (Automated)', () => {
     describe('RFC 9728 Protected Resource Metadata', () => {

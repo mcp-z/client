@@ -14,6 +14,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import getPort from 'get-port';
 import { probeAuthCapabilities } from '../auth/index.ts';
+import { DCR_CAPABILTY_DISCOVERY_TIMEOUT } from '../constants.ts';
 import { DcrAuthenticator, type DcrAuthenticatorOptions } from '../dcr/index.ts';
 import type { ServerProcess } from '../spawn/spawn-server.ts';
 import type { ServersConfig } from '../spawn/spawn-servers.ts';
@@ -234,7 +235,7 @@ export async function connectMcpClient(
 
     // Check for DCR support and handle authentication automatically
     const baseUrl = extractBaseUrl(serverConfig.url);
-    const capabilities = await withTimeout(probeAuthCapabilities(baseUrl), 5000, 'DCR capability discovery');
+    const capabilities = await withTimeout(probeAuthCapabilities(baseUrl), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery');
 
     let authToken: string | undefined;
 

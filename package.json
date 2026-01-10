@@ -50,7 +50,7 @@
     "AGENTS.md"
   ],
   "scripts": {
-    "build": "tsc -p . --noEmit && tsds build",
+    "build": "tsds validate",
     "format": "tsds format",
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
@@ -62,25 +62,24 @@
     "version": "tsds version"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1",
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1",
-    "get-port": "^7.1.0",
-    "keyv": "^5.5.5",
-    "keyv-file": "^5.3.3",
-    "module-root-sync": "^2.0.2"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ajv": "^8.0.0",
+    "ajv-formats": "^3.0.0",
+    "get-port": "^7.0.0",
+    "keyv": "^5.0.0",
+    "keyv-file": "^5.0.0",
+    "module-root-sync": "^2.0.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.0.3",
     "dotenv": "^17.2.3",
-    "express": "^5.2.1",
+    "express": "^5.0.0",
     "json-schema-to-typescript": "^15.0.4",
     "node-version-use": "^2.4.7",
     "ts-dev-stack": "^1.22.1",
     "tsds-config": "^1.0.4",
-    "typescript": "^5.9.3",
-    "zod": "^4.3.4"
+    "zod": "^4.0.0"
   },
   "engines": {
     "node": ">=18"
