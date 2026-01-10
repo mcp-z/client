@@ -1,6 +1,6 @@
 {
   "name": "@mcp-z/client",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Programmatic MCP client library for Node.js - connect, discover, and call tools on Model Context Protocol servers.",
   "keywords": [
     "mcp",
