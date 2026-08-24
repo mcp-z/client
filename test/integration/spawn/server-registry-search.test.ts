@@ -44,6 +44,8 @@ describe('ServerRegistry searchCapabilities', () => {
     if (!registry) {
       throw new Error('Registry not initialized');
     }
-    await assert.rejects(async () => registry.searchCapabilities('echo', { servers: ['does-not-exist'] }), /unknown server/i);
+    // Captured because the closure below outlives the narrowing on the mutable binding.
+    const activeRegistry = registry;
+    await assert.rejects(async () => activeRegistry.searchCapabilities('echo', { servers: ['does-not-exist'] }), /unknown server/i);
   });
 });

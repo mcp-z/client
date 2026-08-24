@@ -23,7 +23,7 @@ export interface SpawnMetadata {
   env?: Record<string, string>;
   cwd?: string;
   pid?: number;
-  [key: string]: JsonValue;
+  [key: string]: JsonValue | undefined;
 }
 
 /**

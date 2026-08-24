@@ -32,7 +32,8 @@ export class ToolResponseWrapper {
   json<T = unknown>(validator?: JsonValidator<T>): T {
     const value = this.resolveJsonPayload();
     if (validator) {
-      validator(value);
+      const assertValid: JsonValidator<T> = validator;
+      assertValid(value);
     }
     return value as T;
   }
@@ -128,7 +129,8 @@ export class PromptResponseWrapper {
     try {
       const parsed = JSON.parse(textValue) as unknown;
       if (validator) {
-        validator(parsed);
+        const assertValid: JsonValidator<T> = validator;
+        assertValid(parsed);
       }
       return parsed as T;
     } catch (error) {
@@ -180,7 +182,8 @@ export class ResourceResponseWrapper {
     try {
       const parsed = JSON.parse(textValue) as unknown;
       if (validator) {
-        validator(parsed);
+        const assertValid: JsonValidator<T> = validator;
+        assertValid(parsed);
       }
       return parsed as T;
     } catch (error) {

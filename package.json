@@ -42,7 +42,6 @@
     "./package.json": "./package.json"
   },
   "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
   "files": [
     "dist",
@@ -71,8 +70,9 @@
     "module-root-sync": "^2.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^25.0.3",
+    "@types/node": "^26.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.0.0",
     "json-schema-to-typescript": "^15.0.4",
@@ -83,6 +83,12 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "allowScripts": {
+    "node-filename-to-dist-paths": true,
+    "node-semvers": true,
+    "node-version-use": true,
+    "thread-sleep-compat": true
   },
   "tsds": {
     "source": "src/index.ts"

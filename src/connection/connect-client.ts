@@ -174,7 +174,7 @@ export async function connectMcpClient(
 ): Promise<Client> {
   // Detect whether we have a RegistryLike instance or just config
   const isRegistry = 'servers' in registryOrConfig && registryOrConfig.servers instanceof Map;
-  const serversConfig = isRegistry ? (registryOrConfig as RegistryLike).config : registryOrConfig;
+  const serversConfig: ServersConfig = isRegistry ? (registryOrConfig as RegistryLike).config : (registryOrConfig as ServersConfig);
   const registry = isRegistry ? (registryOrConfig as RegistryLike) : undefined;
   const logger = options?.logger ?? defaultLogger;
 
