@@ -15,7 +15,7 @@
 </div></section>
 <div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">DcrAuthenticatorOptions</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#headless">headless</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#logger">logger</a><span class="tsd-signature-symbol">?:</span> <a href="../types/Logger.html" class="tsd-signature-type tsd-kind-type-alias">Logger</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#redirecturi">redirectUri</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#tokenstore">tokenStore</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">Keyv</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">any</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/02a657dbd2612ef7d347404e7cf04b3de3636c06/src/dcr/dcr-authenticator.ts#L18">src/dcr/dcr-authenticator.ts:18</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/d6350068b687fe16d5962beb0c057c2f82b64c06/src/dcr/dcr-authenticator.ts#L18">src/dcr/dcr-authenticator.ts:18</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -37,28 +37,28 @@
 <div class="tsd-comment tsd-typography"><p>Headless mode (don't open browser)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/02a657dbd2612ef7d347404e7cf04b3de3636c06/src/dcr/dcr-authenticator.ts#L22">src/dcr/dcr-authenticator.ts:22</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/d6350068b687fe16d5962beb0c057c2f82b64c06/src/dcr/dcr-authenticator.ts#L22">src/dcr/dcr-authenticator.ts:22</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="logger"><code class="tsd-tag">Optional</code><span>logger</span><a href="#logger" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">logger</span><span class="tsd-signature-symbol">?:</span> <a href="../types/Logger.html" class="tsd-signature-type tsd-kind-type-alias">Logger</a></div>
 <div class="tsd-comment tsd-typography"><p>Optional logger for debug output (defaults to singleton logger)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/02a657dbd2612ef7d347404e7cf04b3de3636c06/src/dcr/dcr-authenticator.ts#L26">src/dcr/dcr-authenticator.ts:26</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/d6350068b687fe16d5962beb0c057c2f82b64c06/src/dcr/dcr-authenticator.ts#L26">src/dcr/dcr-authenticator.ts:26</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="redirecturi"><span>redirect<wbr/>Uri</span><a href="#redirecturi" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">redirectUri</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div>
 <div class="tsd-comment tsd-typography"><p>Required redirect URI for OAuth callback</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/02a657dbd2612ef7d347404e7cf04b3de3636c06/src/dcr/dcr-authenticator.ts#L24">src/dcr/dcr-authenticator.ts:24</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/d6350068b687fe16d5962beb0c057c2f82b64c06/src/dcr/dcr-authenticator.ts#L24">src/dcr/dcr-authenticator.ts:24</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="tokenstore"><code class="tsd-tag">Optional</code><span>token<wbr/>Store</span><a href="#tokenstore" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">tokenStore</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">Keyv</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">any</span><span class="tsd-signature-symbol">&gt;</span></div>
 <div class="tsd-comment tsd-typography"><p>Custom Keyv store (for testing) - if not provided, uses default ~/.mcpeasy/tokens.json</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/02a657dbd2612ef7d347404e7cf04b3de3636c06/src/dcr/dcr-authenticator.ts#L20">src/dcr/dcr-authenticator.ts:20</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/d6350068b687fe16d5962beb0c057c2f82b64c06/src/dcr/dcr-authenticator.ts#L20">src/dcr/dcr-authenticator.ts:20</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
