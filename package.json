@@ -54,10 +54,8 @@
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
     "prepublishOnly": "tsds validate",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "tsds test:node --no-timeouts",
     "test:engines": "nvu engines tsds test:node --no-timeouts",
-    "test:integration": "tsds test:node --no-timeouts 'test/integration/**/*.test.ts'",
-    "test:unit": "tsds test:node --no-timeouts 'test/unit/**/*.test.ts'",
     "version": "tsds version"
   },
   "dependencies": {
