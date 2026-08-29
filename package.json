@@ -64,7 +64,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
-    "get-port": "^7.0.0",
+    "get-port": "5.1.1",
     "keyv": "^5.0.0",
     "keyv-file": "5.3.3",
     "module-root-sync": "^2.0.0"
