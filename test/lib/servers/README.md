@@ -1,6 +1,6 @@
 # Test Servers
 
-Docs: https://mcp-z.github.io/client This directory contains MCP test servers for testing @mcp-z/cli functionality. Each server demonstrates a specific transport type and serves as a living example for library users.
+This directory contains MCP test servers for testing @mcp-z/cli functionality. Each server demonstrates a specific transport type and serves as a living example for library users.
 
 ## Server Overview
 

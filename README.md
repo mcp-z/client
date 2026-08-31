@@ -1,6 +1,6 @@
 # @mcp-z/client
 
-Docs: https://mcp-z.github.io/client Programmatic MCP client for spawning, connecting to, and calling MCP servers.
+Programmatic MCP client library for Node.js - connect, discover, and call tools on Model Context Protocol servers.
 
 ## Common uses
 
@@ -159,3 +159,7 @@ const client = await registry.connect('todoist', {
 ## Requirements
 
 - Node.js >= 22
+
+### Documentation
+
+[API Docs](https://mcp-z.github.io/client)
