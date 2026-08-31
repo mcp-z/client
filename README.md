@@ -1,7 +1,6 @@
 # @mcp-z/client
 
-Docs: https://mcp-z.github.io/client
-Programmatic MCP client for spawning, connecting to, and calling MCP servers.
+Docs: https://mcp-z.github.io/client Programmatic MCP client for spawning, connecting to, and calling MCP servers.
 
 ## Common uses
 
