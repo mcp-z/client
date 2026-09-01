@@ -4,9 +4,9 @@
  */
 
 import http from 'node:http';
+import { OAuthCallbackListener } from '@mcp-z/client';
 import assert from 'assert';
 import getPort from 'get-port';
-import { OAuthCallbackListener } from '../../../src/auth/oauth-callback-listener.ts';
 
 describe('unit/auth/oauth-callback-listener', () => {
   it('should start on provided port', async () => {

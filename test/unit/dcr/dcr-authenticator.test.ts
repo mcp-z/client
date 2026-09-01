@@ -3,10 +3,10 @@
  * Tests token management with Keyv storage
  */
 
+import type { TokenSet } from '@mcp-z/client';
+import { DcrAuthenticator } from '@mcp-z/client';
 import assert from 'assert';
 import Keyv from 'keyv';
-import type { TokenSet } from '../../../src/auth/types.ts';
-import { DcrAuthenticator } from '../../../src/dcr/dcr-authenticator.ts';
 
 describe('unit/auth/dcr-authenticator', () => {
   it('should use custom token store when provided', () => {

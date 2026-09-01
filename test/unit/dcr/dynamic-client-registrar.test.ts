@@ -3,8 +3,8 @@
  * Tests RFC 7591 Dynamic Client Registration
  */
 
+import { DynamicClientRegistrar } from '@mcp-z/client';
 import assert from 'assert';
-import { DynamicClientRegistrar } from '../../../src/dcr/dynamic-client-registrar.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 describe('unit/auth/dynamic-client-registrar', () => {

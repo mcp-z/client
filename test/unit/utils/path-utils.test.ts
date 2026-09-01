@@ -1,7 +1,7 @@
+import { resolveArgsPaths, resolvePath } from '@mcp-z/client';
 import assert from 'assert';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveArgsPaths, resolvePath } from '../../../src/utils/path-utils.ts';
 
 describe('resolvePath', () => {
   it('should expand ~ to home directory', () => {
