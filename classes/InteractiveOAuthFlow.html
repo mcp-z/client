@@ -14,7 +14,7 @@
 <div class="tsd-comment tsd-typography"><p>InteractiveOAuthFlow manages the complete OAuth authorization code flow</p>
 </div></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/9e883548dc2666333c69d27f76f69eda6e2ddbda/src/auth/interactive-oauth-flow.ts#L26">src/auth/interactive-oauth-flow.ts:26</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7875b5ca179342d332f3a7ae593cd0c02d329635/src/auth/interactive-oauth-flow.ts#L27">src/auth/interactive-oauth-flow.ts:27</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -80,38 +80,41 @@
 
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/9e883548dc2666333c69d27f76f69eda6e2ddbda/src/auth/interactive-oauth-flow.ts#L52">src/auth/interactive-oauth-flow.ts:52</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7875b5ca179342d332f3a7ae593cd0c02d329635/src/auth/interactive-oauth-flow.ts#L53">src/auth/interactive-oauth-flow.ts:53</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="refreshtokens"><span>refresh<wbr/>Tokens</span><a href="#refreshtokens" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
 <li class="">
-<div class="tsd-signature tsd-anchor-link" id="refreshtokens-1"><span class="tsd-kind-call-signature">refreshTokens</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">tokenEndpoint</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">refreshToken</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">clientId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">clientSecret</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span><a href="#refreshtokens-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-signature tsd-anchor-link" id="refreshtokens-1"><span class="tsd-kind-call-signature">refreshTokens</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">tokenEndpoint</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">refreshToken</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">clientId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">clientSecret</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">allowLoopback</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span><a href="#refreshtokens-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
-<div class="tsd-comment tsd-typography"><p>Refresh access token using refresh token</p>
+<div class="tsd-comment tsd-typography"><p>Refreshes an access token using a refresh token.</p>
 </div>
 <div class="tsd-parameters">
 <h4 class="tsd-parameters-title">Parameters</h4>
 <ul class="tsd-parameter-list">
 <li><span><span class="tsd-kind-parameter">tokenEndpoint</span>: <span class="tsd-signature-type">string</span></span>
-<div class="tsd-comment tsd-typography"><p>OAuth token endpoint URL</p>
+<div class="tsd-comment tsd-typography"><p>OAuth token endpoint URL.</p>
 </div></li>
 <li><span><span class="tsd-kind-parameter">refreshToken</span>: <span class="tsd-signature-type">string</span></span>
-<div class="tsd-comment tsd-typography"><p>Refresh token from previous token set</p>
+<div class="tsd-comment tsd-typography"><p>Refresh token from a previous token set.</p>
 </div></li>
 <li><span><span class="tsd-kind-parameter">clientId</span>: <span class="tsd-signature-type">string</span></span>
-<div class="tsd-comment tsd-typography"><p>OAuth client ID</p>
+<div class="tsd-comment tsd-typography"><p>OAuth client ID.</p>
 </div></li>
 <li><span><span class="tsd-kind-parameter">clientSecret</span>: <span class="tsd-signature-type">string</span></span>
-<div class="tsd-comment tsd-typography"><p>OAuth client secret</p>
+<div class="tsd-comment tsd-typography"><p>OAuth client secret.</p>
+</div></li>
+<li><span><span class="tsd-kind-parameter">allowLoopback</span>: <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol"> = false</span></span>
+<div class="tsd-comment tsd-typography"><p>Loopback trust grant computed by the caller from the server it is actually talking to, never from <code>tokenEndpoint</code>. Defaults to <code>false</code>.</p>
 </div></li></ul></div>
-<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span></h4><p>New token set with refreshed access token</p>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span></h4><p>New token set with a refreshed access token.</p>
 
 <div class="tsd-comment tsd-typography">
 <div class="tsd-tag-throws">
-<h4 class="tsd-anchor-link" id="throws-1">Throws<a href="#throws-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><p>Error if refresh fails</p>
+<h4 class="tsd-anchor-link" id="throws-1">Throws<a href="#throws-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><p>Error if refresh fails.</p>
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/9e883548dc2666333c69d27f76f69eda6e2ddbda/src/auth/interactive-oauth-flow.ts#L184">src/auth/interactive-oauth-flow.ts:184</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7875b5ca179342d332f3a7ae593cd0c02d329635/src/auth/interactive-oauth-flow.ts#L192">src/auth/interactive-oauth-flow.ts:192</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
