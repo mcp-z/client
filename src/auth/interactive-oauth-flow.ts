@@ -5,6 +5,7 @@
 
 import * as child_process from 'node:child_process';
 import { logger as defaultLogger } from '../utils/logger.ts';
+import { discoveryFetch } from './discovery-fetch.ts';
 import { OAuthCallbackListener } from './oauth-callback-listener.ts';
 import { generatePkce } from './pkce.ts';
 import type { OAuthFlowOptions, PkceParams, TokenSet } from './types.ts';
@@ -104,7 +105,7 @@ export class InteractiveOAuthFlow {
       const result = await callbackListener.waitForCallback(timeout);
 
       // Exchange authorization code for tokens (with PKCE verifier if used)
-      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, pkce?.codeVerifier);
+      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, options.allowLoopback ?? false, pkce?.codeVerifier);
 
       return tokens;
     } catch (error) {
@@ -117,10 +118,11 @@ export class InteractiveOAuthFlow {
   }
 
   /**
-   * Exchange authorization code for access and refresh tokens
-   * @param codeVerifier - Optional PKCE code verifier (RFC 7636)
+   * Exchanges an authorization code for access and refresh tokens.
+   * @param allowLoopback - Loopback trust grant computed by the caller from the server it is actually talking to, never from `tokenEndpoint`.
+   * @param codeVerifier - Optional PKCE code verifier (RFC 7636).
    */
-  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, codeVerifier?: string): Promise<TokenSet> {
+  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, allowLoopback: boolean, codeVerifier?: string): Promise<TokenSet> {
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -134,15 +136,22 @@ export class InteractiveOAuthFlow {
       params.set('code_verifier', codeVerifier);
     }
 
-    const response = await fetch(tokenEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-        Connection: 'close',
+    // tokenEndpoint is remote-controlled discovery data; discoveryFetch blocks
+    // a private/internal target before the client secret is sent to it.
+    const response = await discoveryFetch(
+      tokenEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          Connection: 'close',
+        },
+        body: params,
       },
-      body: params,
-    });
+      'token endpoint',
+      { allowLoopback }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -171,31 +180,36 @@ export class InteractiveOAuthFlow {
   }
 
   /**
-   * Refresh access token using refresh token
-   *
-   * @param tokenEndpoint - OAuth token endpoint URL
-   * @param refreshToken - Refresh token from previous token set
-   * @param clientId - OAuth client ID
-   * @param clientSecret - OAuth client secret
-   * @returns New token set with refreshed access token
-   *
-   * @throws Error if refresh fails
+   * Refreshes an access token using a refresh token.
+   * @param tokenEndpoint - OAuth token endpoint URL.
+   * @param refreshToken - Refresh token from a previous token set.
+   * @param clientId - OAuth client ID.
+   * @param clientSecret - OAuth client secret.
+   * @param allowLoopback - Loopback trust grant computed by the caller from the server it is actually talking to, never from `tokenEndpoint`. Defaults to `false`.
+   * @returns New token set with a refreshed access token.
+   * @throws Error if refresh fails.
    */
-  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string): Promise<TokenSet> {
-    const response = await fetch(tokenEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-        Connection: 'close',
+  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string, allowLoopback = false): Promise<TokenSet> {
+    // See exchangeCodeForTokens - tokenEndpoint is remote-controlled discovery data.
+    const response = await discoveryFetch(
+      tokenEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          Connection: 'close',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: clientId,
+          client_secret: clientSecret,
+        }),
       },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
-    });
+      'token endpoint',
+      { allowLoopback }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

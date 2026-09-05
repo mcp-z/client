@@ -189,8 +189,14 @@ describe('unit/auth/rfc9728-discovery', () => {
   });
 
   describe('discoverAuthorizationServerMetadata', () => {
+    // These calls provide a loopback URL directly (the caller *is* the
+    // server it wants metadata from), so they pass { allowLoopback: true } -
+    // the same grant capability-discovery.ts computes automatically from its
+    // own baseUrl. See discovery-fetch.test.ts for the SSRF-relevant case:
+    // an untrusted caller must NOT get this for free just because the target
+    // happens to be loopback.
     it('should discover authorization server metadata from .well-known endpoint', async () => {
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997');
+      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997', { allowLoopback: true });
 
       assert.strictEqual(metadata?.issuer, 'http://localhost:9997');
       assert.strictEqual(metadata?.authorization_endpoint, 'http://localhost:9997/oauth/authorize');
@@ -201,27 +207,36 @@ describe('unit/auth/rfc9728-discovery', () => {
 
     it('should extract origin from URLs with paths', async () => {
       // Should check origin even if given a URL with path
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997/some/path');
+      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997/some/path', { allowLoopback: true });
 
       assert.strictEqual(metadata?.issuer, 'http://localhost:9997');
       assert.strictEqual(metadata?.authorization_endpoint, 'http://localhost:9997/oauth/authorize');
     });
 
     it('should return null on network error', async () => {
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:8886');
+      const metadata = await discoverAuthorizationServerMetadata('http://localhost:8886', { allowLoopback: true });
 
       assert.strictEqual(metadata, null);
     });
 
     it('should return null on 404 response', async () => {
       // Use a different port that doesn't have a server
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:7777');
+      const metadata = await discoverAuthorizationServerMetadata('http://localhost:7777', { allowLoopback: true });
 
       assert.strictEqual(metadata, null);
     });
 
     it('should return null on invalid URL', async () => {
       const metadata = await discoverAuthorizationServerMetadata('not-a-url');
+
+      assert.strictEqual(metadata, null);
+    });
+
+    it('should return null without a loopback grant, even though a server is listening', async () => {
+      // Same target as the first test in this block, but with the default
+      // (no grant) - this is exactly the SSRF case: an untrusted caller
+      // cannot get discovery routed to a loopback address for free.
+      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997');
 
       assert.strictEqual(metadata, null);
     });
@@ -236,7 +251,7 @@ describe('unit/auth/rfc9728-discovery', () => {
       });
 
       try {
-        const metadata = await discoverAuthorizationServerMetadata(`${baseUrl}/outlook`);
+        const metadata = await discoverAuthorizationServerMetadata(`${baseUrl}/outlook`, { allowLoopback: true });
 
         assert.strictEqual(metadata?.issuer, `${baseUrl}/outlook`);
         assert.strictEqual(metadata?.authorization_endpoint, `${baseUrl}/outlook/oauth/authorize`);

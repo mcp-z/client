@@ -121,6 +121,14 @@ export interface DcrRegistrationOptions {
   clientName?: string;
   /** Redirect URI for OAuth callback */
   redirectUri?: string;
+  /**
+   * Loopback trust grant for the registration_endpoint fetch (SSRF
+   * mitigation - see `src/auth/discovery-fetch.ts`). Compute this from the
+   * MCP server the caller is actually talking to, never from
+   * `registrationEndpoint` itself (which is typically sourced from
+   * remote-controlled AS metadata). Defaults to `false`.
+   */
+  allowLoopback?: boolean;
 }
 
 /**
@@ -143,4 +151,12 @@ export interface OAuthFlowOptions {
   timeout?: number;
   /** Optional logger for debug output (defaults to singleton logger) */
   logger?: import('../utils/logger.ts').Logger;
+  /**
+   * Loopback trust grant for the token endpoint fetch (SSRF mitigation - see
+   * `src/auth/discovery-fetch.ts`). Compute this from the MCP server the
+   * caller is actually talking to, never from `tokenEndpoint` itself (which
+   * is typically sourced from remote-controlled AS metadata). Defaults to
+   * `false`.
+   */
+  allowLoopback?: boolean;
 }

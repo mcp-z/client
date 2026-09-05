@@ -4,6 +4,7 @@
  */
 
 export { probeAuthCapabilities } from './capability-discovery.ts';
+export { DiscoveryFetchError, isLoopbackUrl } from './discovery-fetch.ts';
 export { InteractiveOAuthFlow } from './interactive-oauth-flow.ts';
 export type { OAuthCallbackListenerOptions } from './oauth-callback-listener.ts';
 export { OAuthCallbackListener } from './oauth-callback-listener.ts';

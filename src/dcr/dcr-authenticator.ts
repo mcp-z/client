@@ -7,6 +7,7 @@ import path from 'node:path';
 import * as fs from 'fs';
 import Keyv from 'keyv';
 import { KeyvFile } from 'keyv-file';
+import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
 import type { AuthCapabilities, TokenSet } from '../auth/types.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
@@ -112,6 +113,9 @@ export class DcrAuthenticator {
    * Self-hosted servers manage their own token storage via /oauth/verify
    */
   private async ensureAuthenticatedSelfHosted(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+    // Loopback trust for every discovery-derived fetch below, computed from
+    // the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
+    const allowLoopback = isLoopbackUrl(baseUrl);
     const dcrTokenKey = `dcr-tokens:${baseUrl}`;
 
     // 1. Check for existing DCR tokens (different from external tokens)
@@ -155,15 +159,17 @@ export class DcrAuthenticator {
     this.logger.debug('📝 Registering OAuth client with self-hosted server...');
     const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
       redirectUri: this.redirectUri,
+      allowLoopback,
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger } = {
+    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger; allowLoopback: boolean } = {
       port,
       headless: this.headless,
       redirectUri: this.redirectUri,
       pkce: true,
       logger: this.logger,
+      allowLoopback,
     };
     if (capabilities.scopes) {
       flowOptions.scopes = capabilities.scopes;
@@ -200,10 +206,10 @@ export class DcrAuthenticator {
     return tokens;
   }
 
-  /**
-   * Handle authentication for external OAuth providers (original implementation)
-   */
+  /** Handles authentication for external (non-self-hosted) OAuth providers. */
   private async ensureAuthenticatedExternal(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+    // See ensureAuthenticatedSelfHosted - same loopback trust rule.
+    const allowLoopback = isLoopbackUrl(baseUrl);
     const tokenKey = `tokens:${baseUrl}`;
 
     // 1. Check for existing tokens
@@ -215,7 +221,7 @@ export class DcrAuthenticator {
         this.logger.debug('🔄 Refreshing access token...');
 
         try {
-          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint);
+          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, allowLoopback);
           await this.tokenStore.set(tokenKey, tokens);
           this.logger.debug('✅ Token refreshed successfully');
         } catch (_error) {
@@ -245,15 +251,17 @@ export class DcrAuthenticator {
     this.logger.debug('📝 Registering OAuth client...');
     const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
       redirectUri: this.redirectUri,
+      allowLoopback,
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger } = {
+    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger; allowLoopback: boolean } = {
       port,
       headless: this.headless,
       redirectUri: this.redirectUri,
       pkce: true,
       logger: this.logger,
+      allowLoopback,
     };
     if (capabilities.scopes) {
       flowOptions.scopes = capabilities.scopes;
@@ -269,9 +277,10 @@ export class DcrAuthenticator {
   }
 
   /**
-   * Refresh access token using refresh token
+   * Refreshes an access token using a refresh token.
+   * @param allowLoopback - Loopback trust grant computed from the server actually being talked to (SSRF mitigation, see discovery-fetch.ts). Defaults to `false`.
    */
-  private async refreshTokens(tokens: TokenSet, tokenEndpoint?: string): Promise<TokenSet> {
+  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, allowLoopback = false): Promise<TokenSet> {
     if (!tokenEndpoint) {
       throw new Error('Token endpoint not available for refresh');
     }
@@ -284,7 +293,7 @@ export class DcrAuthenticator {
       throw new Error('Client credentials not available for refresh');
     }
 
-    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret);
+    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, allowLoopback);
   }
 
   /**

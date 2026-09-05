@@ -1,6 +1,6 @@
+import type { CapabilityIndex, IndexedPrompt, IndexedResource, IndexedTool } from '@mcp-z/client';
+import { searchCapabilities } from '@mcp-z/client';
 import assert from 'assert';
-import { searchCapabilities } from '../../../src/search/search.ts';
-import type { CapabilityIndex, IndexedPrompt, IndexedResource, IndexedTool } from '../../../src/search/types.ts';
 
 describe('searchCapabilities', () => {
   // Create a test index with various capabilities

@@ -3,11 +3,10 @@
  * Implements RFC 7591 for OAuth client registration
  */
 
+import { discoveryFetch } from '../auth/discovery-fetch.ts';
 import type { ClientCredentials, DcrRegistrationOptions } from '../auth/types.ts';
 
-/**
- * DCR Registration Request (RFC 7591)
- */
+/** DCR Registration Request (RFC 7591) */
 interface DcrRegistrationRequest {
   client_name?: string;
   redirect_uris?: string[];
@@ -16,9 +15,7 @@ interface DcrRegistrationRequest {
   token_endpoint_auth_method?: string;
 }
 
-/**
- * DCR Registration Response (RFC 7591)
- */
+/** DCR Registration Response (RFC 7591) */
 interface DcrRegistrationResponse {
   client_id: string;
   client_secret?: string;
@@ -26,26 +23,15 @@ interface DcrRegistrationResponse {
   client_secret_expires_at?: number;
 }
 
-/**
- * DynamicClientRegistrar handles Dynamic Client Registration with OAuth servers
- */
+/** Handles Dynamic Client Registration with OAuth servers. */
 export class DynamicClientRegistrar {
   /**
-   * Register a new OAuth client with the authorization server
+   * Registers a new OAuth client with the authorization server (RFC 7591).
    *
-   * @param registrationEndpoint - DCR registration endpoint URL
-   * @param options - Registration options (client name, redirect URI)
-   * @returns Client credentials (client ID and secret)
-   *
-   * @throws Error if registration fails or server returns error
-   *
-   * @example
-   * const registrar = new DynamicClientRegistrar();
-   * const creds = await registrar.registerClient(
-   *   'https://example.com/oauth/register',
-   *   { clientName: '@mcp-z/client', redirectUri: 'http://localhost:3000/callback' }
-   * );
-   * console.log('Client ID:', creds.clientId);
+   * @param registrationEndpoint - Often sourced from remote-controlled AS metadata; pass `options.allowLoopback` explicitly. Defaults to `false`.
+   * @param options - Registration options (client name, redirect URI, loopback trust).
+   * @returns Client credentials (client ID and secret).
+   * @throws Error if registration fails or the server returns an error.
    */
   async registerClient(registrationEndpoint: string, options: DcrRegistrationOptions = {}): Promise<ClientCredentials> {
     const requestBody: DcrRegistrationRequest = {
@@ -56,15 +42,22 @@ export class DynamicClientRegistrar {
       token_endpoint_auth_method: 'client_secret_basic',
     };
 
-    const response = await fetch(registrationEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Connection: 'close',
+    // registrationEndpoint is remote-controlled discovery data; allowLoopback
+    // must come from the caller's own trust, never from registrationEndpoint.
+    const response = await discoveryFetch(
+      registrationEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Connection: 'close',
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    });
+      'registration endpoint',
+      { allowLoopback: options.allowLoopback ?? false }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

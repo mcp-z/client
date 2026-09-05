@@ -45,6 +45,55 @@ These steps are implemented in:
 - `src/auth/rfc9728-discovery.ts`
 - `src/auth/capability-discovery.ts`
 
+### SSRF mitigation (MCP `2026-07-28` security best practices, RFC 9728 §7.7)
+
+Every URL in this flow after the initial connection - the `resource_metadata`
+document, the `authorization_servers` entries, and the endpoints in the RFC
+8414 metadata they point at - is supplied by the remote MCP server, not the
+caller. A malicious or compromised server can point any of them at cloud
+instance metadata (`169.254.169.254`), a loopback service such as a local
+Redis or admin panel, or another host on the operator's private network. All
+such fetches (including the `token_endpoint` and `registration_endpoint`
+fetches in the DCR/OAuth flow below) go through `src/auth/discovery-fetch.ts`,
+which enforces:
+- `https://` required, and private/link-local/reserved IPv4 and IPv6 ranges
+  blocked, using `ipaddr.js` rather than hand-rolled parsing. The MCP spec
+  calls this out explicitly: "Avoid implementing IP validation manually.
+  Attackers exploit encoding tricks (octal, hex, IPv4-mapped IPv6) that custom
+  parsers often miss." `ipaddr.js` normalizes IPv4-mapped IPv6
+  (`::ffff:169.254.169.254`) to IPv4 before classifying, and the WHATWG `URL`
+  parser used to read the host already canonicalizes octal/hex/decimal IPv4
+  literals (`0x7f000001`, `017700000001`, `2130706433` all become
+  `127.0.0.1`), so none of those encodings can sneak a private address past
+  the check as an opaque hostname string.
+- Loopback (`127.0.0.0/8`, `::1`, `localhost`) is the one carve-out, and it is
+  granted **per call**, not globally: every caller passes `allowLoopback`
+  computed from the MCP server it is actually talking to (the user-configured
+  base URL) - never from the URL being fetched. A public, untrusted server
+  returning `authorization_servers: ["http://127.0.0.1:6379/"]` is refused
+  even though the address is loopback; `http://localhost:3000/oauth/token`
+  from a server the caller is already talking to over loopback is allowed.
+  This is what keeps the local OAuth callback flow and the test suite working
+  without configuration, without also trusting loopback targets a remote
+  server merely claims are safe. There is no global opt-out: a call site
+  that needs a private address grants it explicitly via `allowLoopback`, or
+  it is refused.
+- Every redirect hop re-validated with the same grant (redirects are not
+  auto-followed).
+- For a hostname target (not a literal IP, and not `localhost` under an
+  `allowLoopback` grant), DNS is resolved ourselves and every returned
+  address is checked before the original URL is handed to `fetch`. This
+  blocks the common case (attacker's hostname resolves to an internal
+  address) but does not fully close the DNS-rebinding race where the record's
+  TTL expires and the answer changes between our lookup and `fetch`'s own
+  resolution a moment later; closing that fully requires pinning the resolved
+  address at the connection layer (e.g. a custom `undici.Agent` with an
+  overridden `connect`/`lookup`), which is not implemented here.
+- An aggressive connect/read timeout and a response body size cap enforced
+  while reading, not after.
+- A single, generic error message on failure so internal network topology is
+  never reflected back to whatever triggered the discovery.
+
 ## DCR and OAuth Flow
 When a server requires OAuth:
 1) **DCR (RFC 7591)** registers a client using the `registration_endpoint`.

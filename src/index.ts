@@ -6,6 +6,7 @@
 export type { McpServerEntry, StartConfig } from '../schemas/servers.d.ts';
 // Auth - OAuth utilities
 export { probeAuthCapabilities } from './auth/capability-discovery.ts';
+export { DiscoveryFetchError, isLoopbackUrl } from './auth/discovery-fetch.ts';
 export type { AuthCapabilities, CallbackResult, OAuthCallbackListenerOptions, OAuthFlowOptions, TokenSet } from './auth/index.ts';
 export { InteractiveOAuthFlow } from './auth/interactive-oauth-flow.ts';
 export { OAuthCallbackListener } from './auth/oauth-callback-listener.ts';

@@ -3,10 +3,10 @@
  * Tests token management with Keyv storage
  */
 
+import type { AuthCapabilities, TokenSet } from '@mcp-z/client';
+import { DcrAuthenticator } from '@mcp-z/client';
 import assert from 'assert';
 import Keyv from 'keyv';
-import type { TokenSet } from '../../../src/auth/types.ts';
-import { DcrAuthenticator } from '../../../src/dcr/dcr-authenticator.ts';
 
 describe('unit/auth/dcr-authenticator', () => {
   it('should use custom token store when provided', () => {
@@ -79,5 +79,31 @@ describe('unit/auth/dcr-authenticator', () => {
     });
 
     assert.ok(authenticator);
+  });
+
+  it('should refuse DCR registration when a public server points registration_endpoint at loopback (SSRF)', async () => {
+    // This is the exact attack the loopback-trust design exists to stop:
+    // baseUrl is a public server (never itself fetched by ensureAuthenticated
+    // for the external/non-self-hosted path - only used as a trust signal
+    // and a token-store key), and its AS metadata (represented here by
+    // `capabilities`, as if already discovered) points registration_endpoint
+    // at a loopback service the operator did not intend to expose. Because
+    // baseUrl is public, allowLoopback is computed as false, and the POST
+    // must be refused before any request is sent - regardless of whether
+    // anything happens to be listening on that port.
+    const tokenStore = new Keyv();
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
+
+    const maliciousCapabilities: AuthCapabilities = {
+      supportsDcr: true,
+      registrationEndpoint: 'http://localhost:9998/oauth/register',
+      authorizationEndpoint: 'http://localhost:9998/oauth/authorize',
+      tokenEndpoint: 'http://localhost:9998/oauth/token',
+    };
+
+    await assert.rejects(authenticator.ensureAuthenticated('https://public.example.com/mcp', maliciousCapabilities), (error: Error) => {
+      assert.ok(error.message.includes('trusted loopback origin'), error.message);
+      return true;
+    });
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import { normalizeUrl } from '../lib/url-utils.ts';
+import { isLoopbackUrl } from './discovery-fetch.ts';
 import { discoverAuthorizationServerIssuer, discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from './rfc9728-discovery.ts';
 import type { AuthCapabilities, AuthorizationServerMetadata } from './types.ts';
 
@@ -68,8 +69,8 @@ function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: strin
   return capabilities;
 }
 
-async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes?: string[]): Promise<AuthCapabilities | null> {
-  const metadata = await discoverAuthorizationServerMetadata(authServerUrl);
+async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes: string[] | undefined, allowLoopback: boolean): Promise<AuthCapabilities | null> {
+  const metadata = await discoverAuthorizationServerMetadata(authServerUrl, { allowLoopback });
   if (!metadata) return null;
   return buildCapabilities(metadata, scopes);
 }
@@ -77,6 +78,9 @@ async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string,
 export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabilities> {
   try {
     const normalizedBaseUrl = normalizeUrl(baseUrl);
+    // Trust signal for every authorization-server fetch below: whether the
+    // configured MCP server is itself loopback, never a remote-supplied URL.
+    const allowLoopback = isLoopbackUrl(normalizedBaseUrl);
     // Strategy 1: Try RFC 9728 Protected Resource Metadata discovery
     // This handles cross-domain OAuth (e.g., Todoist: ai.todoist.net/mcp → todoist.com)
     const resourceMetadata = await discoverProtectedResourceMetadata(normalizedBaseUrl);
@@ -89,28 +93,28 @@ export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabi
         // Array has length > 0 but first element is undefined/null - skip this path
         return { supportsDcr: false };
       }
-      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported);
+      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported, allowLoopback);
       if (capabilities) {
         return capabilities;
       }
 
       const issuer = await discoverAuthorizationServerIssuer(baseUrl);
       if (issuer) {
-        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported);
+        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported, allowLoopback);
         if (issuerCapabilities) return issuerCapabilities;
       }
     }
 
     const issuer = await discoverAuthorizationServerIssuer(normalizedBaseUrl);
     if (issuer) {
-      const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer);
+      const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, undefined, allowLoopback);
       if (issuerCapabilities) return issuerCapabilities;
     }
 
     // Strategy 2: Fall back to direct RFC 8414 discovery at resource origin
     // This handles same-domain OAuth (traditional setup)
     const origin = getOrigin(normalizedBaseUrl);
-    const originCapabilities = await resolveCapabilitiesFromAuthorizationServer(origin);
+    const originCapabilities = await resolveCapabilitiesFromAuthorizationServer(origin, undefined, allowLoopback);
     if (originCapabilities) return originCapabilities;
 
     // No OAuth metadata found

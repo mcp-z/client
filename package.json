@@ -63,6 +63,7 @@
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
     "get-port": "5.1.1",
+    "ipaddr.js": "^2.5.0",
     "keyv": "^5.0.0",
     "keyv-file": "5.3.3",
     "module-root-sync": "^2.0.0"
@@ -81,12 +82,6 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "allowScripts": {
-    "node-filename-to-dist-paths": true,
-    "node-semvers": true,
-    "node-version-use": true,
-    "thread-sleep-compat": true
   },
   "tsds": {
     "source": "src/index.ts"

@@ -1,6 +1,6 @@
+import type { ManagedClient } from '@mcp-z/client';
+import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';
-import type { ManagedClient } from '../../src/client-helpers.ts';
-import { createServerRegistry, type ServerRegistry } from '../../src/spawn/spawn-servers.ts';
 
 describe('ManagedClient helper overloads', () => {
   let registry: ServerRegistry | undefined;
