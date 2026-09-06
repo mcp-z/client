@@ -57,6 +57,33 @@ describe('unit/auth/dcr-authenticator', () => {
     assert.ok(await tokenStore.get('dcr-tokens:https://issuer.example.com:http://other.example.com'), 'other resources are left alone');
   });
 
+  it('should delete both token families, across every issuer, in one call', async () => {
+    const tokenStore = new Keyv();
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback' });
+
+    const testTokens: TokenSet = {
+      accessToken: 'test_access_token',
+      refreshToken: 'test_refresh_token',
+      expiresAt: Date.now() + 3600000,
+    };
+
+    // One server reached through two issuers, holding both an external and a
+    // self-hosted DCR credential. Deleting per-family or per-issuer leaves a
+    // usable credential behind, which is the failure this pins.
+    await tokenStore.set('tokens:https://issuer-a.example.com:http://example.com', testTokens);
+    await tokenStore.set('dcr-tokens:https://issuer-a.example.com:http://example.com', testTokens);
+    await tokenStore.set('tokens:https://issuer-b.example.com:http://example.com', testTokens);
+    await tokenStore.set('dcr-tokens:https://issuer-b.example.com:http://example.com', testTokens);
+    await tokenStore.set('tokens:https://issuer-a.example.com:http://other.example.com', testTokens);
+
+    await authenticator.deleteTokens('http://example.com');
+
+    for (const key of ['tokens:https://issuer-a.example.com:http://example.com', 'dcr-tokens:https://issuer-a.example.com:http://example.com', 'tokens:https://issuer-b.example.com:http://example.com', 'dcr-tokens:https://issuer-b.example.com:http://example.com']) {
+      assert.strictEqual(await tokenStore.get(key), undefined, `${key} should have been deleted`);
+    }
+    assert.ok(await tokenStore.get('tokens:https://issuer-a.example.com:http://other.example.com'), 'other resources are left alone');
+  });
+
   // Credentials are keyed and stamped by issuer, so a resource whose
   // authorization server changes gets a fresh authorization rather than the
   // previous server's tokens (SEP-2352). Each case below stores a credential
