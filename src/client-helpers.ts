@@ -1,5 +1,4 @@
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type { Client } from '@modelcontextprotocol/client';
 import type { ToolArguments } from './connection/types.ts';
 import { type NativeCallToolResponse, type NativeGetPromptResponse, type NativeReadResourceResponse, PromptResponseWrapper, ResourceResponseWrapper, ToolResponseWrapper } from './response-wrappers.ts';
 
@@ -39,10 +38,10 @@ export type ManagedClient = Omit<Client, 'callTool' | 'getPrompt' | 'readResourc
   /** Underlying MCP SDK client for advanced scenarios. */
   readonly nativeClient: Client;
 
-  callTool(toolName: string, args?: ToolArguments, requestOptions?: RequestOptions): WrappedCallToolReturn;
-  callTool(invocation: NativeCallToolParams[0], sessionId?: NativeCallToolParams[1], requestOptions?: NativeCallToolParams[2]): WrappedCallToolReturn;
-  callToolRaw(toolName: string, args?: ToolArguments, requestOptions?: RequestOptions): NativeCallToolReturn;
-  callToolRaw(invocation: NativeCallToolParams[0], sessionId?: NativeCallToolParams[1], requestOptions?: NativeCallToolParams[2]): NativeCallToolReturn;
+  callTool(toolName: string, args?: ToolArguments, requestOptions?: NativeCallToolParams[1]): WrappedCallToolReturn;
+  callTool(invocation: NativeCallToolParams[0], requestOptions?: NativeCallToolParams[1]): WrappedCallToolReturn;
+  callToolRaw(toolName: string, args?: ToolArguments, requestOptions?: NativeCallToolParams[1]): NativeCallToolReturn;
+  callToolRaw(invocation: NativeCallToolParams[0], requestOptions?: NativeCallToolParams[1]): NativeCallToolReturn;
 
   getPrompt(name: string, args?: PromptArguments, requestOptions?: NativeGetPromptParams[1]): WrappedGetPromptReturn;
   getPrompt(invocation: NativeGetPromptParams[0], requestOptions?: NativeGetPromptParams[1]): WrappedGetPromptReturn;
@@ -77,18 +76,18 @@ export function decorateClient(client: Client, metadata: { serverName: string })
   const nativeCallTool = client.callTool.bind(client);
   const wrapCallTool = (promise: NativeCallToolReturn): WrappedCallToolReturn => promise.then((payload) => new ToolResponseWrapper(payload as NativeCallToolResponse));
 
-  enhanced.callTool = ((nameOrInvocation: string | NativeCallToolParams[0], argsOrSession?: ToolArguments | NativeCallToolParams[1], requestOptions?: NativeCallToolParams[2]) => {
+  enhanced.callTool = ((nameOrInvocation: string | NativeCallToolParams[0], argsOrOptions?: ToolArguments | NativeCallToolParams[1], requestOptions?: NativeCallToolParams[1]) => {
     if (typeof nameOrInvocation === 'string') {
-      return wrapCallTool(nativeCallTool({ name: nameOrInvocation, arguments: (argsOrSession as ToolArguments) ?? {} }, undefined, requestOptions));
+      return wrapCallTool(nativeCallTool({ name: nameOrInvocation, arguments: (argsOrOptions as ToolArguments) ?? {} }, requestOptions));
     }
-    return wrapCallTool(nativeCallTool(nameOrInvocation, argsOrSession as NativeCallToolParams[1], requestOptions));
+    return wrapCallTool(nativeCallTool(nameOrInvocation, argsOrOptions as NativeCallToolParams[1]));
   }) as ManagedClient['callTool'];
 
-  enhanced.callToolRaw = ((nameOrInvocation: string | NativeCallToolParams[0], argsOrSession?: ToolArguments | NativeCallToolParams[1], requestOptions?: NativeCallToolParams[2]) => {
+  enhanced.callToolRaw = ((nameOrInvocation: string | NativeCallToolParams[0], argsOrOptions?: ToolArguments | NativeCallToolParams[1], requestOptions?: NativeCallToolParams[1]) => {
     if (typeof nameOrInvocation === 'string') {
-      return nativeCallTool({ name: nameOrInvocation, arguments: (argsOrSession as ToolArguments) ?? {} }, undefined, requestOptions);
+      return nativeCallTool({ name: nameOrInvocation, arguments: (argsOrOptions as ToolArguments) ?? {} }, requestOptions);
     }
-    return nativeCallTool(nameOrInvocation, argsOrSession as NativeCallToolParams[1], requestOptions);
+    return nativeCallTool(nameOrInvocation, argsOrOptions as NativeCallToolParams[1]);
   }) as ManagedClient['callToolRaw'];
 
   const nativeGetPrompt = client.getPrompt.bind(client);

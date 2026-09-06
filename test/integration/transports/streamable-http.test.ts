@@ -5,9 +5,8 @@
  * Validates url + start block configuration pattern.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { Transport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import assert from 'assert';
 import getPort from 'get-port';
 import * as path from 'path';

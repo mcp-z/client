@@ -1,6 +1,5 @@
 import { Buffer } from 'node:buffer';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { ContentBlock, PromptMessage, TextContent } from '@modelcontextprotocol/sdk/types.js';
+import type { Client, ContentBlock, PromptMessage, TextContent } from '@modelcontextprotocol/client';
 
 export type NativeCallToolResponse = Awaited<ReturnType<Client['callTool']>>;
 export type NativeGetPromptResponse = Awaited<ReturnType<Client['getPrompt']>>;

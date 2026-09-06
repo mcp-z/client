@@ -5,13 +5,9 @@
  * Automatically detects transport type from URL protocol or type field.
  */
 
-import '../monkey-patches.ts';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { Transport } from '@modelcontextprotocol/client';
+import { Client, SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import getPort from 'get-port';
 import { probeAuthCapabilities } from '../auth/index.ts';
 import { DCR_CAPABILTY_DISCOVERY_TIMEOUT } from '../constants.ts';

@@ -5,7 +5,7 @@
  * from connected MCP servers.
  */
 
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 import type { PromptArgument } from '../connection/types.ts';
 import type { CapabilityIndex, CapabilityType, IndexedCapability, IndexedPrompt, IndexedResource, IndexedTool, SearchField, SearchOptions, SearchResponse, SearchResult } from './types.ts';
 

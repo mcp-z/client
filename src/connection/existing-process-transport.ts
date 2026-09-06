@@ -5,9 +5,8 @@
  * Used when connecting to servers already spawned by initServers().
  */
 
-import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client';
+import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/client';
 import type { ChildProcess } from 'child_process';
 
 /**

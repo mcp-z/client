@@ -11,7 +11,7 @@
  * 3. Falls back to SIGTERM then SIGKILL if needed
  */
 
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import assert from 'assert';
 import type { ChildProcess } from 'child_process';
 
