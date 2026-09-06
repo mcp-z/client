@@ -53,7 +53,7 @@
     "format": "tsds format",
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
-    "prepublishOnly": "tsds validate",
+    "prepublishOnly": "node scripts/require-dist-tag.cjs && tsds validate",
     "test": "tsds test:node --no-timeouts",
     "test:engines": "nvu engines tsds test:node --no-timeouts",
     "version": "tsds version"
