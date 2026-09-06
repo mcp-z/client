@@ -4,7 +4,7 @@
  */
 
 import * as child_process from 'node:child_process';
-import { logger as defaultLogger } from '../utils/logger.ts';
+import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { discoveryFetch } from './discovery-fetch.ts';
 import { OAuthCallbackListener } from './oauth-callback-listener.ts';
 import { generatePkce } from './pkce.ts';
@@ -47,7 +47,7 @@ export class InteractiveOAuthFlow {
    *   'https://example.com/oauth/token',
    *   'client-id',
    *   'client-secret',
-   *   { port, scopes: ['read', 'write'] }
+   *   { port, issuer: 'https://example.com', resource: 'https://example.com/mcp', scopes: ['read', 'write'] }
    * );
    */
   async performAuthFlow(authorizationEndpoint: string, tokenEndpoint: string, clientId: string, clientSecret: string, options: OAuthFlowOptions): Promise<TokenSet> {
@@ -78,10 +78,8 @@ export class InteractiveOAuthFlow {
         authUrl.searchParams.set('scope', options.scopes.join(' '));
       }
 
-      // Add resource parameter if specified (RFC 8707)
-      if (options.resource) {
-        authUrl.searchParams.set('resource', options.resource);
-      }
+      // Audience-bind the request to the resource server (RFC 8707)
+      authUrl.searchParams.set('resource', options.resource);
 
       // Add PKCE parameters if generated (RFC 7636)
       if (pkce) {
@@ -104,8 +102,10 @@ export class InteractiveOAuthFlow {
       const timeout = options.timeout || (options.headless ? 60000 : 300000);
       const result = await callbackListener.waitForCallback(timeout);
 
+      this.assertResponseIssuer(result.iss, options, logger);
+
       // Exchange authorization code for tokens (with PKCE verifier if used)
-      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, options.allowLoopback ?? false, pkce?.codeVerifier);
+      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, options.resource, options.allowLoopback ?? false, pkce?.codeVerifier);
 
       return tokens;
     } catch (error) {
@@ -118,17 +118,38 @@ export class InteractiveOAuthFlow {
   }
 
   /**
+   * Rejects an authorization response that was not minted by the issuer
+   * discovered before the flow started (RFC 9207 authorization-server mix-up).
+   */
+  private assertResponseIssuer(iss: string | undefined, options: OAuthFlowOptions, logger: Logger): void {
+    if (iss !== undefined) {
+      if (iss !== options.issuer) {
+        throw new Error(`Authorization response issuer mismatch: got '${iss}', expected '${options.issuer}' - refusing to redeem the authorization code`);
+      }
+      return;
+    }
+
+    if (options.authorizationResponseIssSupported) {
+      throw new Error(`Authorization server '${options.issuer}' advertises authorization_response_iss_parameter_supported but omitted 'iss' - refusing to redeem the authorization code`);
+    }
+
+    logger.debug(`⚠️  Authorization response carried no 'iss' and '${options.issuer}' does not advertise support for it (RFC 9207)`);
+  }
+
+  /**
    * Exchanges an authorization code for access and refresh tokens.
+   * @param resource - Canonical resource server URI, audience-binding the token (RFC 8707).
    * @param allowLoopback - Loopback trust grant computed by the caller from the server it is actually talking to, never from `tokenEndpoint`.
    * @param codeVerifier - Optional PKCE code verifier (RFC 7636).
    */
-  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, allowLoopback: boolean, codeVerifier?: string): Promise<TokenSet> {
+  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, resource: string, allowLoopback: boolean, codeVerifier?: string): Promise<TokenSet> {
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri,
       client_id: clientId,
       client_secret: clientSecret,
+      resource,
     });
 
     // Add PKCE code verifier if provided (RFC 7636)
@@ -185,11 +206,12 @@ export class InteractiveOAuthFlow {
    * @param refreshToken - Refresh token from a previous token set.
    * @param clientId - OAuth client ID.
    * @param clientSecret - OAuth client secret.
+   * @param resource - Canonical resource server URI, audience-binding the token (RFC 8707).
    * @param allowLoopback - Loopback trust grant computed by the caller from the server it is actually talking to, never from `tokenEndpoint`. Defaults to `false`.
    * @returns New token set with a refreshed access token.
    * @throws Error if refresh fails.
    */
-  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string, allowLoopback = false): Promise<TokenSet> {
+  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string, resource: string, allowLoopback = false): Promise<TokenSet> {
     // See exchangeCodeForTokens - tokenEndpoint is remote-controlled discovery data.
     const response = await discoveryFetch(
       tokenEndpoint,
@@ -205,6 +227,7 @@ export class InteractiveOAuthFlow {
           refresh_token: refreshToken,
           client_id: clientId,
           client_secret: clientSecret,
+          resource,
         }),
       },
       'token endpoint',

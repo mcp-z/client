@@ -29,45 +29,101 @@ describe('unit/auth/dcr-authenticator', () => {
       clientSecret: 'test_secret',
     };
 
-    await tokenStore.set('tokens:http://example.com', testTokens);
+    await tokenStore.set('tokens:https://issuer.example.com:http://example.com', testTokens);
+    await tokenStore.set('tokens:https://issuer.example.com:http://other.example.com', testTokens);
 
-    // Verify tokens exist
-    const storedTokens = await tokenStore.get('tokens:http://example.com');
-    assert.ok(storedTokens);
-
-    // Delete tokens
     await authenticator.deleteTokens('http://example.com');
 
-    // Verify tokens are deleted
-    const deletedTokens = await tokenStore.get('tokens:http://example.com');
-    assert.strictEqual(deletedTokens, undefined);
+    assert.strictEqual(await tokenStore.get('tokens:https://issuer.example.com:http://example.com'), undefined);
+    assert.ok(await tokenStore.get('tokens:https://issuer.example.com:http://other.example.com'), 'other resources are left alone');
   });
 
-  it('should key tokens by base URL', async () => {
+  it('should delete self-hosted DCR tokens for a base URL', async () => {
     const tokenStore = new Keyv();
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback' });
 
-    // Add tokens for different base URLs
-    const tokens1: TokenSet = {
-      accessToken: 'token1',
-      refreshToken: 'refresh1',
+    const testTokens: TokenSet = {
+      accessToken: 'test_access_token',
+      refreshToken: 'test_refresh_token',
       expiresAt: Date.now() + 3600000,
     };
 
-    const tokens2: TokenSet = {
-      accessToken: 'token2',
-      refreshToken: 'refresh2',
+    await tokenStore.set('dcr-tokens:https://issuer.example.com:http://example.com', testTokens);
+    await tokenStore.set('dcr-tokens:https://issuer.example.com:http://other.example.com', testTokens);
+
+    await authenticator.deleteTokens('http://example.com');
+
+    assert.strictEqual(await tokenStore.get('dcr-tokens:https://issuer.example.com:http://example.com'), undefined);
+    assert.ok(await tokenStore.get('dcr-tokens:https://issuer.example.com:http://other.example.com'), 'other resources are left alone');
+  });
+
+  // Credentials are keyed and stamped by issuer, so a resource whose
+  // authorization server changes gets a fresh authorization rather than the
+  // previous server's tokens (SEP-2352). Each case below stores a credential
+  // for ISSUER_A and then discovers capabilities that carry no endpoints, so
+  // "did it reuse the stored credential?" is answered by whether the call
+  // returns the token or falls through to the missing-endpoints failure.
+  const ISSUER_A = 'https://issuer-a.example.com';
+  const ISSUER_B = 'https://issuer-b.example.com';
+  const RESOURCE = 'https://resource.example.com';
+  const STORED_KEY = `tokens:${ISSUER_A}:${RESOURCE}`;
+
+  function storedTokens(issuer?: string): TokenSet {
+    const tokens: TokenSet = {
+      accessToken: 'stored_access_token',
+      refreshToken: 'stored_refresh_token',
       expiresAt: Date.now() + 3600000,
+      clientId: 'stored_client',
+      clientSecret: 'stored_secret',
     };
+    if (issuer) tokens.issuer = issuer;
+    return tokens;
+  }
 
-    await tokenStore.set('tokens:http://server1.com', tokens1);
-    await tokenStore.set('tokens:http://server2.com', tokens2);
+  it('should reuse a credential stored for the discovered issuer', async () => {
+    const tokenStore = new Keyv();
+    await tokenStore.set(STORED_KEY, storedTokens(ISSUER_A));
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
 
-    // Verify isolation
-    const retrieved1 = (await tokenStore.get('tokens:http://server1.com')) as TokenSet;
-    const retrieved2 = (await tokenStore.get('tokens:http://server2.com')) as TokenSet;
+    const tokens = await authenticator.ensureAuthenticated(RESOURCE, { supportsDcr: true, issuer: ISSUER_A });
 
-    assert.strictEqual(retrieved1.accessToken, 'token1');
-    assert.strictEqual(retrieved2.accessToken, 'token2');
+    assert.strictEqual(tokens.accessToken, 'stored_access_token');
+  });
+
+  it('should never present a stored credential to a different authorization server', async () => {
+    const tokenStore = new Keyv();
+    await tokenStore.set(STORED_KEY, storedTokens(ISSUER_A));
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
+
+    await assert.rejects(authenticator.ensureAuthenticated(RESOURCE, { supportsDcr: true, issuer: ISSUER_B }), (error: Error) => {
+      assert.ok(error.message.includes('does not provide required OAuth endpoints'), error.message);
+      return true;
+    });
+
+    assert.ok(await tokenStore.get(STORED_KEY), "issuer A's credential is untouched, not handed to issuer B");
+  });
+
+  it('should discard a stored credential that carries no issuer', async () => {
+    const tokenStore = new Keyv();
+    await tokenStore.set(STORED_KEY, storedTokens());
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
+
+    await assert.rejects(authenticator.ensureAuthenticated(RESOURCE, { supportsDcr: true, issuer: ISSUER_A }), (error: Error) => {
+      assert.ok(error.message.includes('does not provide required OAuth endpoints'), error.message);
+      return true;
+    });
+
+    assert.strictEqual(await tokenStore.get(STORED_KEY), undefined, 'unbound credential is discarded, not reused');
+  });
+
+  it('should refuse to authenticate against an authorization server that advertises no issuer', async () => {
+    const tokenStore = new Keyv();
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
+
+    await assert.rejects(authenticator.ensureAuthenticated(RESOURCE, { supportsDcr: true }), (error: Error) => {
+      assert.ok(error.message.includes('has no issuer'), error.message);
+      return true;
+    });
   });
 
   it('should support headless mode', () => {
@@ -96,6 +152,7 @@ describe('unit/auth/dcr-authenticator', () => {
 
     const maliciousCapabilities: AuthCapabilities = {
       supportsDcr: true,
+      issuer: 'http://localhost:9998',
       registrationEndpoint: 'http://localhost:9998/oauth/register',
       authorizationEndpoint: 'http://localhost:9998/oauth/authorize',
       tokenEndpoint: 'http://localhost:9998/oauth/token',

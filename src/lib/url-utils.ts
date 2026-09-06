@@ -3,8 +3,8 @@ export function normalizeUrl(input: string): string {
     const url = new URL(input);
     url.search = '';
     url.hash = '';
-    url.pathname = url.pathname.replace(/\/+$/, '');
-    return url.origin + url.pathname;
+    // Strip after joining: assigning an empty pathname puts the '/' straight back.
+    return (url.origin + url.pathname).replace(/\/+$/, '');
   } catch {
     return input.replace(/\/+$/, '');
   }

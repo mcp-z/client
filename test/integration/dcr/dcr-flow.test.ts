@@ -130,17 +130,20 @@ describe('integration/dcr-auth', () => {
 
   it('should delete tokens for specific base URL', async () => {
     const baseUrl = 'http://localhost:9990';
+    const issuer = 'http://localhost:9990';
+    const tokenKey = `tokens:${issuer}:${baseUrl}`;
 
     const tokens: TokenSet = {
       accessToken: 'test_token',
       refreshToken: 'test_refresh',
       expiresAt: Date.now() + 3600000,
+      issuer,
     };
 
-    await tokenStore.set(`tokens:${baseUrl}`, tokens);
+    await tokenStore.set(tokenKey, tokens);
 
     // Verify tokens exist
-    let retrieved = await tokenStore.get(`tokens:${baseUrl}`);
+    let retrieved = await tokenStore.get(tokenKey);
     assert.ok(retrieved);
 
     // Delete using DcrAuthenticator
@@ -148,7 +151,7 @@ describe('integration/dcr-auth', () => {
     await authenticator.deleteTokens(baseUrl);
 
     // Verify tokens are deleted
-    retrieved = await tokenStore.get(`tokens:${baseUrl}`);
+    retrieved = await tokenStore.get(tokenKey);
     assert.strictEqual(retrieved, undefined);
   });
 

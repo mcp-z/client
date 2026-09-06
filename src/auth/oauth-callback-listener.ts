@@ -81,6 +81,7 @@ export class OAuthCallbackListener {
   private handleCallback(url: URL, res: http.ServerResponse): void {
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
+    const iss = url.searchParams.get('iss');
     const error = url.searchParams.get('error');
     const errorDescription = url.searchParams.get('error_description');
 
@@ -144,6 +145,9 @@ export class OAuthCallbackListener {
       const result: CallbackResult = { code };
       if (state) {
         result.state = state;
+      }
+      if (iss) {
+        result.iss = iss;
       }
       this.resolveCallback(result);
     }

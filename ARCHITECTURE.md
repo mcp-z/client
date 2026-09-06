@@ -96,9 +96,22 @@ which enforces:
 
 ## DCR and OAuth Flow
 When a server requires OAuth:
-1) **DCR (RFC 7591)** registers a client using the `registration_endpoint`.
+1) **DCR (RFC 7591)** registers a client using the `registration_endpoint`, as
+   `application_type: "native"` with the OS-assigned loopback redirect URI the
+   callback listener has already bound (RFC 8252).
 2) **Authorization Code + PKCE (RFC 6749 + RFC 7636)** is used to obtain tokens.
 3) **Token exchange** uses the `token_endpoint` defined in RFC 8414 metadata.
+4) **`iss` validation (RFC 9207)** compares the authorization response's `iss`
+   against the issuer discovered before the flow started. A mismatch, or an
+   omitted `iss` from a server advertising
+   `authorization_response_iss_parameter_supported`, aborts the flow and the
+   authorization code is never redeemed.
+5) **`resource` (RFC 8707)** carries the canonical resource server URI on the
+   authorization, token, and refresh requests, so issued tokens are
+   audience-bound to one resource.
+6) **Credentials are keyed by issuer** (`tokens:{issuer}:{resource}`) and carry
+   the issuer they were granted by, so a resource whose authorization server
+   changes re-authorizes instead of presenting the previous server's tokens.
 
 These flows are implemented in:
 - `src/auth/*`

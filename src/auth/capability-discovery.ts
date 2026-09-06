@@ -47,7 +47,11 @@ function getOrigin(url: string): string {
  */
 function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: string[]): AuthCapabilities {
   const supportsDcr = !!metadata.registration_endpoint;
-  const capabilities: AuthCapabilities = { supportsDcr };
+  const capabilities: AuthCapabilities = { supportsDcr, authorizationResponseIssSupported: metadata.authorization_response_iss_parameter_supported === true };
+
+  if (metadata.issuer) {
+    capabilities.issuer = metadata.issuer;
+  }
 
   if (metadata.registration_endpoint) {
     capabilities.registrationEndpoint = metadata.registration_endpoint;

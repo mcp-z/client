@@ -9,7 +9,8 @@ import Keyv from 'keyv';
 import { KeyvFile } from 'keyv-file';
 import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
-import type { AuthCapabilities, TokenSet } from '../auth/types.ts';
+import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
+import { normalizeUrl } from '../lib/url-utils.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { DynamicClientRegistrar } from './dynamic-client-registrar.ts';
 
@@ -31,6 +32,25 @@ export interface DcrAuthenticatorOptions {
  * Buffer time before token expiry to trigger proactive refresh (5 minutes)
  */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+/** Raised when a credential cannot be bound to, or looked up by, an issuer. */
+class CredentialBindingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CredentialBindingError';
+  }
+}
+
+/**
+ * The issuer credentials are keyed by, so they can never be presented to a
+ * different authorization server even when the resource keeps its URL (SEP-2352).
+ */
+function requireIssuer(capabilities: AuthCapabilities): string {
+  if (!capabilities.issuer) {
+    throw new CredentialBindingError('Authorization server metadata has no issuer - credentials cannot be bound to an authorization server (RFC 8414 requires issuer)');
+  }
+  return capabilities.issuer;
+}
 
 /**
  * DcrAuthenticator manages authentication for MCP HTTP servers
@@ -116,10 +136,12 @@ export class DcrAuthenticator {
     // Loopback trust for every discovery-derived fetch below, computed from
     // the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
     const allowLoopback = isLoopbackUrl(baseUrl);
-    const dcrTokenKey = `dcr-tokens:${baseUrl}`;
+    const issuer = requireIssuer(capabilities);
+    const resource = normalizeUrl(baseUrl);
+    const dcrTokenKey = `dcr-tokens:${issuer}:${resource}`;
 
     // 1. Check for existing DCR tokens (different from external tokens)
-    let tokens = (await this.tokenStore.get(dcrTokenKey)) as TokenSet | undefined;
+    let tokens = await this.loadTokens(dcrTokenKey, issuer);
 
     if (tokens) {
       // 2. Verify token is still valid by calling /oauth/verify
@@ -163,17 +185,7 @@ export class DcrAuthenticator {
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger; allowLoopback: boolean } = {
-      port,
-      headless: this.headless,
-      redirectUri: this.redirectUri,
-      pkce: true,
-      logger: this.logger,
-      allowLoopback,
-    };
-    if (capabilities.scopes) {
-      flowOptions.scopes = capabilities.scopes;
-    }
+    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback);
 
     tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
 
@@ -200,7 +212,7 @@ export class DcrAuthenticator {
     }
 
     // Save tokens for future use
-    await this.tokenStore.set(dcrTokenKey, tokens);
+    await this.tokenStore.set(dcrTokenKey, { ...tokens, issuer });
     this.logger.debug('✅ Self-hosted DCR authentication successful, tokens saved');
 
     return tokens;
@@ -210,10 +222,12 @@ export class DcrAuthenticator {
   private async ensureAuthenticatedExternal(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
     // See ensureAuthenticatedSelfHosted - same loopback trust rule.
     const allowLoopback = isLoopbackUrl(baseUrl);
-    const tokenKey = `tokens:${baseUrl}`;
+    const issuer = requireIssuer(capabilities);
+    const resource = normalizeUrl(baseUrl);
+    const tokenKey = `tokens:${issuer}:${resource}`;
 
     // 1. Check for existing tokens
-    let tokens = (await this.tokenStore.get(tokenKey)) as TokenSet | undefined;
+    let tokens = await this.loadTokens(tokenKey, issuer);
 
     if (tokens) {
       // 2. Proactive refresh if token expires within 5 minutes
@@ -221,8 +235,8 @@ export class DcrAuthenticator {
         this.logger.debug('🔄 Refreshing access token...');
 
         try {
-          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, allowLoopback);
-          await this.tokenStore.set(tokenKey, tokens);
+          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, resource, allowLoopback);
+          await this.tokenStore.set(tokenKey, { ...tokens, issuer });
           this.logger.debug('✅ Token refreshed successfully');
         } catch (_error) {
           // Refresh failed - clear tokens and re-authenticate
@@ -255,22 +269,12 @@ export class DcrAuthenticator {
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions: { port: number; headless: boolean; scopes?: string[]; redirectUri: string; pkce: boolean; logger: Logger; allowLoopback: boolean } = {
-      port,
-      headless: this.headless,
-      redirectUri: this.redirectUri,
-      pkce: true,
-      logger: this.logger,
-      allowLoopback,
-    };
-    if (capabilities.scopes) {
-      flowOptions.scopes = capabilities.scopes;
-    }
+    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback);
 
     tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
 
     // Save tokens for future use
-    await this.tokenStore.set(tokenKey, tokens);
+    await this.tokenStore.set(tokenKey, { ...tokens, issuer });
     this.logger.debug('✅ Authentication successful, tokens saved');
 
     return tokens;
@@ -278,9 +282,10 @@ export class DcrAuthenticator {
 
   /**
    * Refreshes an access token using a refresh token.
+   * @param resource - Canonical resource server URI, audience-binding the token (RFC 8707).
    * @param allowLoopback - Loopback trust grant computed from the server actually being talked to (SSRF mitigation, see discovery-fetch.ts). Defaults to `false`.
    */
-  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, allowLoopback = false): Promise<TokenSet> {
+  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, resource: string, allowLoopback = false): Promise<TokenSet> {
     if (!tokenEndpoint) {
       throw new Error('Token endpoint not available for refresh');
     }
@@ -293,15 +298,53 @@ export class DcrAuthenticator {
       throw new Error('Client credentials not available for refresh');
     }
 
-    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, allowLoopback);
+    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, resource, allowLoopback);
   }
 
   /**
-   * Delete stored tokens for a server
+   * Deletes both stored token families for a server, across every issuer they were bound to.
+   * @throws CredentialBindingError if the configured store cannot enumerate keys.
    */
   async deleteTokens(baseUrl: string): Promise<void> {
-    const tokenKey = `tokens:${baseUrl}`;
-    await this.tokenStore.delete(tokenKey);
+    const suffix = `:${normalizeUrl(baseUrl)}`;
+    if (!this.tokenStore.iterator) {
+      throw new CredentialBindingError('Token store does not support key enumeration, which issuer-keyed credentials require');
+    }
+
+    for await (const [key] of this.tokenStore.iterator(this.tokenStore.namespace)) {
+      if (typeof key === 'string' && (key.startsWith('tokens:') || key.startsWith('dcr-tokens:')) && key.endsWith(suffix)) {
+        await this.tokenStore.delete(key);
+      }
+    }
     this.logger.debug(`🗑️  Deleted tokens for ${baseUrl}`);
+  }
+
+  /** Discards a stored credential that is not bound to `issuer` (SEP-2352), including one stored before issuer binding existed. */
+  private async loadTokens(key: string, issuer: string): Promise<TokenSet | undefined> {
+    const tokens = (await this.tokenStore.get(key)) as TokenSet | undefined;
+    if (!tokens) return undefined;
+    if (tokens.issuer === issuer) return tokens;
+
+    this.logger.debug('🔑 Stored credential is not bound to the discovered issuer, re-authorizing');
+    await this.tokenStore.delete(key);
+    return undefined;
+  }
+
+  private buildFlowOptions(port: number, capabilities: AuthCapabilities, issuer: string, resource: string, allowLoopback: boolean): OAuthFlowOptions {
+    const flowOptions: OAuthFlowOptions = {
+      port,
+      issuer,
+      resource,
+      headless: this.headless,
+      redirectUri: this.redirectUri,
+      pkce: true,
+      logger: this.logger,
+      allowLoopback,
+      authorizationResponseIssSupported: capabilities.authorizationResponseIssSupported ?? false,
+    };
+    if (capabilities.scopes) {
+      flowOptions.scopes = capabilities.scopes;
+    }
+    return flowOptions;
   }
 }

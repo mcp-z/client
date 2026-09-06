@@ -54,12 +54,13 @@ describe('unit/auth/oauth-callback-listener', () => {
     const callbackPromise = listener.waitForCallback(5000);
 
     // Send callback request
-    const response = await fetch(`http://localhost:${port}/callback?code=test_code_123&state=test_state`);
+    const response = await fetch(`http://localhost:${port}/callback?code=test_code_123&state=test_state&iss=https%3A%2F%2Fissuer.example.com`);
     assert.strictEqual(response.status, 200);
 
     const result = await callbackPromise;
     assert.strictEqual(result.code, 'test_code_123');
     assert.strictEqual(result.state, 'test_state');
+    assert.strictEqual(result.iss, 'https://issuer.example.com');
 
     await listener.stop();
   });
@@ -71,6 +72,8 @@ describe('unit/auth/oauth-callback-listener', () => {
     await listener.start();
 
     const callbackPromise = listener.waitForCallback(5000);
+    // Rejection is asserted below, after the callback that causes it.
+    callbackPromise.catch(() => {});
 
     // Send callback request with error
     const response = await fetch(`http://localhost:${port}/callback?error=access_denied&error_description=User%20denied`);

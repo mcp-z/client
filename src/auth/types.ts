@@ -10,6 +10,8 @@ export interface CallbackResult {
   code: string;
   /** State parameter for CSRF protection */
   state?: string;
+  /** Issuer identifier of the authorization server that minted the response (RFC 9207) */
+  iss?: string;
 }
 
 /**
@@ -41,6 +43,8 @@ export interface TokenSet {
   clientId?: string;
   /** Client secret used for DCR registration (stored for future use) */
   clientSecret?: string;
+  /** Issuer identifier of the authorization server these credentials belong to (SEP-2352) */
+  issuer?: string;
 }
 
 /**
@@ -81,6 +85,8 @@ export interface AuthorizationServerMetadata {
   grant_types_supported?: string[];
   /** Token endpoint authentication methods supported */
   token_endpoint_auth_methods_supported?: string[];
+  /** Whether the authorization response carries an `iss` parameter (RFC 9207) */
+  authorization_response_iss_parameter_supported?: boolean;
 }
 
 /**
@@ -89,6 +95,10 @@ export interface AuthorizationServerMetadata {
 export interface AuthCapabilities {
   /** Whether the server supports Dynamic Client Registration (RFC 7591) */
   supportsDcr: boolean;
+  /** Issuer identifier from the authorization server metadata (RFC 8414) */
+  issuer?: string;
+  /** Whether the authorization response carries an `iss` parameter (RFC 9207) */
+  authorizationResponseIssSupported?: boolean;
   /** DCR client registration endpoint */
   registrationEndpoint?: string;
   /** OAuth authorization endpoint */
@@ -117,10 +127,10 @@ export interface ClientCredentials {
  * Options for DCR client registration
  */
 export interface DcrRegistrationOptions {
+  /** Redirect URI for OAuth callback, from the loopback listener the caller has already bound (RFC 8252) */
+  redirectUri: string;
   /** Client name to register */
   clientName?: string;
-  /** Redirect URI for OAuth callback */
-  redirectUri?: string;
   /**
    * Loopback trust grant for the registration_endpoint fetch (SSRF
    * mitigation - see `src/auth/discovery-fetch.ts`). Compute this from the
@@ -137,12 +147,16 @@ export interface DcrRegistrationOptions {
 export interface OAuthFlowOptions {
   /** Port for OAuth callback listener (required - use get-port to find available port) */
   port: number;
+  /** Issuer identifier discovered before the flow starts; the `iss` in the authorization response must match it (RFC 9207) */
+  issuer: string;
+  /** Canonical resource server URI, sent as `resource` on the authorization, token, and refresh requests (RFC 8707) */
+  resource: string;
   /** Redirect URI for OAuth callback (optional - will be built from port if not provided) */
   redirectUri?: string;
   /** OAuth scopes to request */
   scopes?: string[];
-  /** Resource parameter (RFC 8707) - target resource server identifier */
-  resource?: string;
+  /** Whether the authorization server advertises `authorization_response_iss_parameter_supported` (RFC 9207) */
+  authorizationResponseIssSupported?: boolean;
   /** Enable PKCE (RFC 7636) - recommended for all clients, required for public clients */
   pkce?: boolean;
   /** Headless mode (don't open browser) */

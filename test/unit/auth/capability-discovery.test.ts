@@ -28,6 +28,8 @@ describe('unit/auth/capability-discovery', () => {
     assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
     assert.strictEqual(capabilities.authorizationEndpoint, 'http://localhost:9999/oauth/authorize');
     assert.strictEqual(capabilities.tokenEndpoint, 'http://localhost:9999/oauth/token');
+    assert.strictEqual(capabilities.issuer, 'http://localhost:9999');
+    assert.strictEqual(capabilities.authorizationResponseIssSupported, false);
     assert.deepStrictEqual(capabilities.scopes, ['read', 'write']);
   });
 

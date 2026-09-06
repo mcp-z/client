@@ -13,6 +13,7 @@ interface DcrRegistrationRequest {
   grant_types?: string[];
   response_types?: string[];
   token_endpoint_auth_method?: string;
+  application_type?: string;
 }
 
 /** DCR Registration Response (RFC 7591) */
@@ -29,17 +30,20 @@ export class DynamicClientRegistrar {
    * Registers a new OAuth client with the authorization server (RFC 7591).
    *
    * @param registrationEndpoint - Often sourced from remote-controlled AS metadata; pass `options.allowLoopback` explicitly. Defaults to `false`.
-   * @param options - Registration options (client name, redirect URI, loopback trust).
+   * @param options - Registration options (redirect URI, client name, loopback trust).
    * @returns Client credentials (client ID and secret).
    * @throws Error if registration fails or the server returns an error.
    */
-  async registerClient(registrationEndpoint: string, options: DcrRegistrationOptions = {}): Promise<ClientCredentials> {
+  async registerClient(registrationEndpoint: string, options: DcrRegistrationOptions): Promise<ClientCredentials> {
     const requestBody: DcrRegistrationRequest = {
       client_name: options.clientName || '@mcp-z/client',
-      redirect_uris: options.redirectUri ? [options.redirectUri] : ['http://localhost:3000/callback'],
+      redirect_uris: [options.redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'client_secret_basic',
+      // The callback listener always binds an OS-assigned loopback port, so the
+      // redirect URI is one an authorization server rejects for a web client (SEP-837, RFC 8252).
+      application_type: 'native',
     };
 
     // registrationEndpoint is remote-controlled discovery data; allowLoopback
