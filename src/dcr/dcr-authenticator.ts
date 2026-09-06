@@ -300,8 +300,11 @@ export class DcrAuthenticator {
    * Delete stored tokens for a server
    */
   async deleteTokens(baseUrl: string): Promise<void> {
-    const tokenKey = `tokens:${baseUrl}`;
-    await this.tokenStore.delete(tokenKey);
+    // Both families this class writes: `tokens:` from the external OAuth path
+    // (line ~213) and `dcr-tokens:` from the self-hosted DCR path (line ~119).
+    // Deleting only one leaves a usable credential behind for a caller that
+    // believes it revoked them.
+    await Promise.all([this.tokenStore.delete(`tokens:${baseUrl}`), this.tokenStore.delete(`dcr-tokens:${baseUrl}`)]);
     this.logger.debug(`🗑️  Deleted tokens for ${baseUrl}`);
   }
 }

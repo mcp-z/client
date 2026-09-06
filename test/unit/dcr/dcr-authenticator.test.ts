@@ -43,6 +43,30 @@ describe('unit/auth/dcr-authenticator', () => {
     assert.strictEqual(deletedTokens, undefined);
   });
 
+  it('should delete both token families for a base URL', async () => {
+    const tokenStore = new Keyv();
+    const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback' });
+
+    const testTokens: TokenSet = {
+      accessToken: 'test_access_token',
+      refreshToken: 'test_refresh_token',
+      expiresAt: Date.now() + 3600000,
+    };
+
+    // This class writes two families: `tokens:` for external OAuth and
+    // `dcr-tokens:` for self-hosted DCR. Deleting per-family leaves a usable
+    // credential behind for a caller that believes it revoked them.
+    await tokenStore.set('tokens:http://example.com', testTokens);
+    await tokenStore.set('dcr-tokens:http://example.com', testTokens);
+    await tokenStore.set('dcr-tokens:http://other.example.com', testTokens);
+
+    await authenticator.deleteTokens('http://example.com');
+
+    assert.strictEqual(await tokenStore.get('tokens:http://example.com'), undefined);
+    assert.strictEqual(await tokenStore.get('dcr-tokens:http://example.com'), undefined, 'self-hosted DCR tokens must go too');
+    assert.ok(await tokenStore.get('dcr-tokens:http://other.example.com'), 'other resources are left alone');
+  });
+
   it('should key tokens by base URL', async () => {
     const tokenStore = new Keyv();
 

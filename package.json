@@ -53,32 +53,32 @@
     "format": "tsds format",
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
-    "prepublishOnly": "tsds validate",
+    "prepublishOnly": "node scripts/require-dist-tag.cjs && tsds validate",
     "test": "tsds test:node --no-timeouts",
     "test:engines": "nvu engines tsds test:node --no-timeouts",
     "version": "tsds version"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "ajv": "^8.0.0",
-    "ajv-formats": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "get-port": "5.1.1",
     "ipaddr.js": "^2.5.0",
-    "keyv": "^5.0.0",
+    "keyv": "^5.6.0",
     "keyv-file": "5.3.3",
-    "module-root-sync": "^2.0.0"
+    "module-root-sync": "^2.0.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.2.0",
-    "dotenv": "^17.2.3",
-    "express": "^5.0.0",
+    "@types/node": "^26.4.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "json-schema-to-typescript": "^16.0.0",
-    "node-version-use": "^2.4.7",
-    "ts-dev-stack": "^1.22.1",
-    "tsds-config": "^1.0.4",
-    "zod": "^4.0.0"
+    "node-version-use": "^2.5.8",
+    "ts-dev-stack": "^1.22.6",
+    "tsds-config": "^1.0.5",
+    "zod": "^4.5.4"
   },
   "engines": {
     "node": ">=20"
