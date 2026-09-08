@@ -156,6 +156,28 @@ const client = await registry.connect('todoist', {
 });
 ```
 
+## Protocol version negotiation
+
+By default a connect performs the plain 2025 MCP connect sequence. Pass `versionNegotiation` to negotiate the protocol revision instead:
+
+```ts
+// Probe the server first; connect at the newest revision it offers,
+// falling back to the 2025 sequence when it cannot serve the modern era
+const client = await registry.connect('modern-server', {
+  versionNegotiation: { mode: 'auto' }
+});
+
+// Require the 2026-07-28 revision; a server that cannot serve it fails
+// the connect with SdkErrorCode.EraNegotiationFailed
+const pinned = await registry.connect('strict-server', {
+  versionNegotiation: { mode: { pin: '2026-07-28' } }
+});
+```
+
+After connecting, `client.getProtocolEra()` returns `'modern'` or `'legacy'` and `client.getNegotiatedProtocolVersion()` the revision the server settled on.
+
+Note: with `mode: 'auto'` against a stdio server, a legacy server that never answers the `server/discover` probe costs the full request timeout (60s) before the client falls back to the 2025 sequence. The probe ends fast when the server answers it at all — with any reply, even a "method not found" error.
+
 ## Requirements
 
 - Node.js >= 22

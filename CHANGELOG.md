@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.0] - 2026-09-07
+
+### Added
+
+- **Protocol version negotiation is now available on connect.** `registry.connect(name, { versionNegotiation })` (and `connectMcpClient`) accepts the SDK's `VersionNegotiationOptions` and passes it through to the MCP client for every transport. The option is omitted by default, so existing callers keep the plain 2025 connect sequence unchanged.
+  - `{ mode: 'auto' }` probes the server with a `server/discover` request first and connects at the newest revision the server offers, falling back to the 2025 sequence when the server cannot serve the modern era.
+  - `{ mode: { pin: '2026-07-28' } }` requires that revision; a server that does not offer it fails the connect with the SDK's typed era-negotiation error instead of silently downgrading.
+  - A connected client reports what it settled on via `getProtocolEra()` (`'modern' | 'legacy'`) and `getNegotiatedProtocolVersion()`.
+- Re-exports of the SDK's negotiation surface so callers can handle an era mismatch without depending on `@modelcontextprotocol/client` directly: `SdkError`, `SdkErrorCode` (use `SdkError.isInstance(error)` and `error.code === SdkErrorCode.EraNegotiationFailed`), and the `VersionNegotiationOptions` type.
+
 ## [2.1.0] - 2026-09-07
 
 ### Fixed

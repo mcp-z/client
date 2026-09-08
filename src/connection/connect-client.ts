@@ -5,7 +5,7 @@
  * Automatically detects transport type from URL protocol or type field.
  */
 
-import type { Transport } from '@modelcontextprotocol/client';
+import type { ClientOptions, Transport, VersionNegotiationOptions } from '@modelcontextprotocol/client';
 import { Client, SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import getPort from 'get-port';
@@ -111,6 +111,15 @@ function inferTransportType(config: McpServerEntry): TransportType {
  *
  * @param registryOrConfig - Result from createServerRegistry() or servers config object
  * @param serverName - Server name from servers config
+ * @param options - Connection options (see below)
+ * @param options.dcrAuthenticator - DCR authenticator options
+ * @param options.logger - Logger for connection diagnostics
+ * @param options.versionNegotiation - SDK protocol version negotiation (protocol revision
+ *   2026-07-28 and later). Omitted by default, which keeps the SDK's `'legacy'` mode:
+ *   the plain 2025 connect sequence. Pass `{ mode: 'auto' }` to probe the server and
+ *   fall back to 2025 when it cannot serve the modern era, or `{ mode: { pin: '2026-07-28' } }`
+ *   to require the pinned revision (a server that cannot serve it fails the connect with
+ *   a typed era-negotiation error).
  * @returns Connected MCP SDK Client (guaranteed ready)
  *
  * @example
@@ -136,6 +145,7 @@ export async function connectMcpClient(
   options?: {
     dcrAuthenticator?: Partial<DcrAuthenticatorOptions>;
     logger?: Logger;
+    versionNegotiation?: VersionNegotiationOptions;
   }
 ): Promise<Client> {
   // Detect whether we have a RegistryLike instance or just config
@@ -154,8 +164,16 @@ export async function connectMcpClient(
   // Infer transport type with validation
   const transportType = inferTransportType(serverConfig);
 
+  // SDK client options for both transports (main + SSE fallback). versionNegotiation is
+  // omitted rather than set to undefined so the default stays the SDK's 'legacy' mode —
+  // the plain 2025 connect sequence — for callers that do not pass it.
+  const clientOptions: ClientOptions = { capabilities: {} };
+  if (options?.versionNegotiation !== undefined) {
+    clientOptions.versionNegotiation = options.versionNegotiation;
+  }
+
   // Create MCP client
-  const client = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, { capabilities: {} });
+  const client = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
 
   // Connect based on inferred transport
   if (transportType === 'stdio') {
@@ -284,7 +302,7 @@ export async function connectMcpClient(
       }
 
       // Create new client for SSE transport (required per SDK pattern)
-      const sseClient = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, { capabilities: {} });
+      const sseClient = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
 
       // SSE transport with merged headers (static + DCR auth)
       // Reuse the same header merging logic as Streamable HTTP

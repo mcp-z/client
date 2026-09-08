@@ -2,6 +2,11 @@
  * @mcp-z/client - MCP Client Library
  */
 
+export type { VersionNegotiationOptions } from '@modelcontextprotocol/client';
+// SDK re-exports for protocol version negotiation: the connect-option type and the typed
+// errors a negotiation can fail with, so callers can handle era mismatch without
+// depending on the SDK themselves.
+export { SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
 // Config types (from schema)
 export type { McpServerEntry, StartConfig } from '../schemas/servers.d.ts';
 // Auth - OAuth utilities
