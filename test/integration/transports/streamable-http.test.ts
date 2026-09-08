@@ -5,6 +5,7 @@
  * Validates url + start block configuration pattern.
  */
 
+import '../../lib/env-loader.ts';
 import type { Transport } from '@modelcontextprotocol/client';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import assert from 'assert';

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.0] - 2026-09-07
+
+### Fixed
+
+- **The RFC 8707 `resource` indicator named the wrong resource on every OAuth request.** A server configured as `https://example.com/mcp` asked its authorization server for a token audience-bound to `https://example.com` — the deployment root, which is not a protected resource. An authorization server that validates the indicator rejects that with `invalid_target` before the consent screen, so DCR authentication against such a server could never complete. Reproduced against Todoist, whose metadata advertises `resource_parameter_supported: true`; the value is now accepted and the flow reaches consent. Every server whose URL ends in `/mcp` was affected. Servers that ignore the parameter — which is what our own `oauth-google` and `oauth-microsoft` do — were unaffected, which is why this went unseen.
+- Authorization, token exchange and refresh all carried the wrong value, so a server could accept the authorization request and still reject the token request.
+
+### Added
+
+- `AuthCapabilities.resource` — the protected resource's canonical identifier, taken from the RFC 9728 metadata document that discovery already fetches. Previously that field was read for its `authorization_servers` and the rest discarded. The resource server's own statement of its identity is what the `resource` indicator now carries; the configured URL stands in only when no such document is published.
+
+### Changed
+
+- Discovery is now given the MCP server's canonical URL with its path intact, rather than the `/mcp`-stripped deployment root. This re-enables the resource-specific (sub-path) branch of RFC 9728 discovery, which could not be reached before: with no path to work from, discovery returned the root document and never looked for the more specific one.
+- **Stored credentials are re-keyed, so every server re-authorizes once on upgrade.** Keys include the server URL, and that URL now keeps its path. Cached tokens were audience-bound to an identifier the server does not recognise, so re-authorizing is the correct outcome rather than something to migrate. `deleteTokens()` takes the same URL as `ensureAuthenticated()` and needs no change at a call site that already passed the configured URL.
+
 ## [2.0.1] - 2026-09-06
 
 ### Changed

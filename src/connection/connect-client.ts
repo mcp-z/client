@@ -12,6 +12,7 @@ import getPort from 'get-port';
 import { probeAuthCapabilities } from '../auth/index.ts';
 import { DCR_CAPABILTY_DISCOVERY_TIMEOUT } from '../constants.ts';
 import { DcrAuthenticator, type DcrAuthenticatorOptions } from '../dcr/index.ts';
+import { normalizeUrl } from '../lib/url-utils.ts';
 import type { ServerProcess } from '../spawn/spawn-server.ts';
 import type { ServersConfig } from '../spawn/spawn-servers.ts';
 
@@ -46,37 +47,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string
       timeoutId = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${operation}`)), ms);
     }),
   ]);
-}
-
-/**
- * Extract the "server base" by removing a trailing `/mcp` path segment if present.
- * Examples:
- *  - https://example.com/mcp -> https://example.com
- *  - https://example.com/sheets/mcp -> https://example.com/sheets
- *  - https://example.com/sheets/mcp/ -> https://example.com/sheets
- *  - https://example.com/sheets -> https://example.com/sheets
- */
-export function extractBaseUrl(mcpUrl: string): string {
-  const url = new URL(mcpUrl);
-
-  // Ignore query/hash for base URL purposes
-  url.search = '';
-  url.hash = '';
-
-  // Normalize path segments (removes empty segments from leading/trailing slashes)
-  const segments = url.pathname.split('/').filter(Boolean);
-
-  // If last segment is exactly "mcp", drop it
-  if (segments[segments.length - 1] === 'mcp') {
-    segments.pop();
-  }
-
-  // Rebuild pathname; empty means root
-  url.pathname = segments.length ? `/${segments.join('/')}` : '';
-
-  // Return without trailing slash (except root origin)
-  const out = url.origin + url.pathname;
-  return out === url.origin ? out : out.replace(/\/+$/, '');
 }
 
 /**
@@ -230,8 +200,14 @@ export async function connectMcpClient(
     const url = new URL(serverConfig.url);
 
     // Check for DCR support and handle authentication automatically
-    const baseUrl = extractBaseUrl(serverConfig.url);
-    const capabilities = await withTimeout(probeAuthCapabilities(baseUrl), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery');
+    // The canonical MCP server URI, path segment and all. Both calls below need
+    // the server's identity, not its deployment root: discovery uses the path to
+    // find resource-specific metadata (RFC 9728 sub-path), and the authenticator
+    // audience-binds tokens to it (RFC 8707). Handing either the `/mcp`-stripped
+    // base names a different resource, which authorization servers that validate
+    // the `resource` indicator reject as `invalid_target`.
+    const mcpServerUrl = normalizeUrl(serverConfig.url);
+    const capabilities = await withTimeout(probeAuthCapabilities(mcpServerUrl), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery');
 
     let authToken: string | undefined;
 
@@ -251,7 +227,7 @@ export async function connectMcpClient(
       });
 
       // Ensure we have valid tokens (performs DCR + OAuth if needed)
-      const tokens = await authenticator.ensureAuthenticated(baseUrl, capabilities);
+      const tokens = await authenticator.ensureAuthenticated(mcpServerUrl, capabilities);
       authToken = tokens.accessToken;
 
       logger.debug(`✅ Authentication complete for '${serverName}'`);

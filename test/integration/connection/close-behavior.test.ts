@@ -11,6 +11,7 @@
  * 3. Falls back to SIGTERM then SIGKILL if needed
  */
 
+import '../../lib/env-loader.ts';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import assert from 'assert';
 import type { ChildProcess } from 'child_process';

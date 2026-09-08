@@ -3,6 +3,7 @@
  * Drives the real loopback callback listener against a real token endpoint
  */
 
+import '../../lib/env-loader.ts';
 import http from 'node:http';
 import type { Logger, OAuthFlowOptions } from '@mcp-z/client';
 import { InteractiveOAuthFlow } from '@mcp-z/client';

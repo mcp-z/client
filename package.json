@@ -73,7 +73,6 @@
     "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
-    "dotenv": "^17.2.3",
     "express": "^5.0.0",
     "json-schema-to-typescript": "^16.0.0",
     "node-version-use": "^2.4.7",

@@ -97,6 +97,17 @@ export interface AuthCapabilities {
   supportsDcr: boolean;
   /** Issuer identifier from the authorization server metadata (RFC 8414) */
   issuer?: string;
+  /**
+   * The protected resource's canonical identifier, from the RFC 9728 metadata
+   * document's `resource` field. This is what an RFC 8707 `resource` indicator
+   * must carry, and it is the resource server's own statement of its identity -
+   * not the URL we happened to dial, and never the base URL discovery was
+   * performed against, which has any `/mcp` segment stripped off it.
+   *
+   * Absent when no protected-resource metadata was published and the
+   * authorization server was reached by direct RFC 8414 discovery instead.
+   */
+  resource?: string;
   /** Whether the authorization response carries an `iss` parameter (RFC 9207) */
   authorizationResponseIssSupported?: boolean;
   /** DCR client registration endpoint */

@@ -4,6 +4,7 @@
  * src/auth/discovery-fetch.ts for the threat model.
  */
 
+import '../../lib/env-loader.ts';
 import http from 'node:http';
 import assert from 'assert';
 import getPort from 'get-port';

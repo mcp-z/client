@@ -3,6 +3,7 @@
  * Tests OAuth callback server - caller is responsible for port availability via get-port
  */
 
+import '../../lib/env-loader.ts';
 import http from 'node:http';
 import { OAuthCallbackListener } from '@mcp-z/client';
 import assert from 'assert';

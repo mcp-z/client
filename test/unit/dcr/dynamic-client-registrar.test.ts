@@ -3,6 +3,7 @@
  * Tests RFC 7591 Dynamic Client Registration
  */
 
+import '../../lib/env-loader.ts';
 import http from 'node:http';
 import { DynamicClientRegistrar } from '@mcp-z/client';
 import assert from 'assert';

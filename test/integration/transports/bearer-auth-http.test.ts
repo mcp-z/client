@@ -6,6 +6,7 @@
  * StreamableHTTPClientTransport and SSEClientTransport (fallback).
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import getPort from 'get-port';
 import * as path from 'path';

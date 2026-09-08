@@ -1,3 +1,4 @@
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import type { ServerRegistry, ServersConfig } from '../../../src/index.ts';
 import { createServerRegistry } from '../../../src/spawn/spawn-servers.ts';

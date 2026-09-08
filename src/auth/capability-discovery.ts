@@ -45,12 +45,19 @@ function getOrigin(url: string): string {
  *   console.log('Registration endpoint:', caps.registrationEndpoint);
  * }
  */
-function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: string[]): AuthCapabilities {
+function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: string[], resource?: string): AuthCapabilities {
   const supportsDcr = !!metadata.registration_endpoint;
   const capabilities: AuthCapabilities = { supportsDcr, authorizationResponseIssSupported: metadata.authorization_response_iss_parameter_supported === true };
 
   if (metadata.issuer) {
     capabilities.issuer = metadata.issuer;
+  }
+
+  // Carried from the RFC 9728 document, not from the URL we were given: the
+  // resource server names itself, and that name is what RFC 8707 audience-binds
+  // a token to.
+  if (resource) {
+    capabilities.resource = resource;
   }
 
   if (metadata.registration_endpoint) {
@@ -73,10 +80,10 @@ function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: strin
   return capabilities;
 }
 
-async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes: string[] | undefined, allowLoopback: boolean): Promise<AuthCapabilities | null> {
+async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes: string[] | undefined, allowLoopback: boolean, resource?: string): Promise<AuthCapabilities | null> {
   const metadata = await discoverAuthorizationServerMetadata(authServerUrl, { allowLoopback });
   if (!metadata) return null;
-  return buildCapabilities(metadata, scopes);
+  return buildCapabilities(metadata, scopes, resource);
 }
 
 export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabilities> {
@@ -97,14 +104,14 @@ export async function probeAuthCapabilities(baseUrl: string): Promise<AuthCapabi
         // Array has length > 0 but first element is undefined/null - skip this path
         return { supportsDcr: false };
       }
-      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported, allowLoopback);
+      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource);
       if (capabilities) {
         return capabilities;
       }
 
       const issuer = await discoverAuthorizationServerIssuer(baseUrl);
       if (issuer) {
-        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported, allowLoopback);
+        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource);
         if (issuerCapabilities) return issuerCapabilities;
       }
     }

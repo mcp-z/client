@@ -5,6 +5,7 @@
  * Tests stdio transport (the only transport type that can be spawned locally).
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import * as path from 'path';
 import { fileURLToPath } from 'url';

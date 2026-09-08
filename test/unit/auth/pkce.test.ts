@@ -3,6 +3,7 @@
  * Tests RFC 7636 implementation using oauth4webapi
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import { generatePkce } from '../../../src/auth/pkce.ts';
 

@@ -8,6 +8,7 @@
  * No mocks - uses real started processes via createServerRegistry().
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import * as path from 'path';
 import type { ManagedClient } from '../../../src/client-helpers.ts';

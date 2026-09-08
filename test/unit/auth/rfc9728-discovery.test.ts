@@ -3,6 +3,7 @@
  * Tests .well-known/oauth-protected-resource endpoint probing
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import express from 'express';
 import getPort from 'get-port';

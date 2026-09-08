@@ -1,3 +1,4 @@
+import '../../lib/env-loader.ts';
 import type { CapabilityIndex, IndexedPrompt, IndexedResource, IndexedTool } from '@mcp-z/client';
 import { searchCapabilities } from '@mcp-z/client';
 import assert from 'assert';

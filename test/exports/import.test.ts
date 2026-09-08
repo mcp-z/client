@@ -1,3 +1,4 @@
+import '../lib/env-loader.ts';
 import { createServerRegistry, decorateClient, probeAuthCapabilities, resolvePath, validateServers } from '@mcp-z/client';
 import assert from 'assert';
 

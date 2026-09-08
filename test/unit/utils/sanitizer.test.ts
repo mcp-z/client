@@ -1,3 +1,4 @@
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import type { SpawnMetadata } from '../../../src/connection/types.ts';
 import { sanitizeForLogging } from '../../../src/utils/sanitizer.ts';

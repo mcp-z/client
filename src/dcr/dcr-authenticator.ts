@@ -10,7 +10,7 @@ import { KeyvFile } from 'keyv-file';
 import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
 import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
-import { normalizeUrl } from '../lib/url-utils.ts';
+import { extractBaseUrl, normalizeUrl } from '../lib/url-utils.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { DynamicClientRegistrar } from './dynamic-client-registrar.ts';
 
@@ -89,13 +89,13 @@ export class DcrAuthenticator {
    * Detect if server is self-hosted DCR (vs external OAuth provider)
    * Self-hosted servers have their own OAuth endpoints and manage token storage
    */
-  private async detectSelfHostedMode(baseUrl: string): Promise<boolean> {
+  private async detectSelfHostedMode(mcpServerUrl: string): Promise<boolean> {
     try {
       // Self-hosted DCR servers typically run their own OAuth server
       // Check if this is a self-hosted instance by testing OAuth metadata
-      // For now, assume self-hosted if baseUrl matches common localhost patterns
+      // For now, assume self-hosted if the URL matches common localhost patterns
       // TODO: Implement proper self-hosted detection logic
-      return baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1');
+      return mcpServerUrl.includes('localhost') || mcpServerUrl.includes('127.0.0.1');
     } catch (_error) {
       return false; // Assume external mode if detection fails
     }
@@ -105,7 +105,9 @@ export class DcrAuthenticator {
    * Ensure server is authenticated, performing DCR and OAuth if needed
    * Proactively refreshes tokens if they're within 5 minutes of expiry
    *
-   * @param baseUrl - Base URL of the server (e.g., https://example.com)
+   * @param mcpServerUrl - The MCP server's canonical URL, exactly as configured,
+   *   with its path intact (`https://example.com/mcp`). Not a deployment root:
+   *   the path is what identifies the resource an issued token is bound to.
    * @param capabilities - Auth capabilities from .well-known endpoint
    * @returns Valid token set ready to use
    *
@@ -114,31 +116,54 @@ export class DcrAuthenticator {
    * @example
    * const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback' });
    * const tokens = await authenticator.ensureAuthenticated(
-   *   'https://example.com',
+   *   'https://example.com/mcp',
    *   capabilities
    * );
    */
-  async ensureAuthenticated(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  async ensureAuthenticated(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
     // Auto-detect server mode
-    const isSelfHosted = await this.detectSelfHostedMode(baseUrl);
+    const isSelfHosted = await this.detectSelfHostedMode(mcpServerUrl);
 
     if (isSelfHosted) {
-      return this.ensureAuthenticatedSelfHosted(baseUrl, capabilities);
+      return this.ensureAuthenticatedSelfHosted(mcpServerUrl, capabilities);
     }
-    return this.ensureAuthenticatedExternal(baseUrl, capabilities);
+    return this.ensureAuthenticatedExternal(mcpServerUrl, capabilities);
+  }
+
+  /**
+   * The three things a server URL is used for here, kept apart on purpose.
+   *
+   * They were one value once, and collapsing them is what sent an authorization
+   * server the wrong audience: `resource` was derived from the deployment root,
+   * so a server at `https://host/mcp` was asked to mint a token for
+   * `https://host`, and any server that validates the indicator answered
+   * `invalid_target`.
+   *
+   * - `serverBaseUrl` builds the server's own endpoints (`/oauth/verify`), so a
+   *   trailing `/mcp` comes off.
+   * - `resource` is the RFC 8707 audience. The resource server names itself in
+   *   its RFC 9728 metadata; that name wins. Only when no such document exists
+   *   do we fall back to the URL we were configured with.
+   * - `storeKey` identifies the credential locally. It stays the configured URL
+   *   rather than the discovered `resource`, so it can be computed without a
+   *   network round trip - `deleteTokens` has only the URL to work from.
+   */
+  private resolveUrls(mcpServerUrl: string, capabilities: AuthCapabilities): { serverBaseUrl: string; resource: string; storeKey: string } {
+    const storeKey = normalizeUrl(mcpServerUrl);
+    return { serverBaseUrl: extractBaseUrl(mcpServerUrl), resource: capabilities.resource ?? storeKey, storeKey };
   }
 
   /**
    * Handle authentication for self-hosted DCR servers
    * Self-hosted servers manage their own token storage via /oauth/verify
    */
-  private async ensureAuthenticatedSelfHosted(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  private async ensureAuthenticatedSelfHosted(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
     // Loopback trust for every discovery-derived fetch below, computed from
     // the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
-    const allowLoopback = isLoopbackUrl(baseUrl);
+    const allowLoopback = isLoopbackUrl(mcpServerUrl);
     const issuer = requireIssuer(capabilities);
-    const resource = normalizeUrl(baseUrl);
-    const dcrTokenKey = `dcr-tokens:${issuer}:${resource}`;
+    const { serverBaseUrl, resource, storeKey } = this.resolveUrls(mcpServerUrl, capabilities);
+    const dcrTokenKey = `dcr-tokens:${issuer}:${storeKey}`;
 
     // 1. Check for existing DCR tokens (different from external tokens)
     let tokens = await this.loadTokens(dcrTokenKey, issuer);
@@ -146,7 +171,7 @@ export class DcrAuthenticator {
     if (tokens) {
       // 2. Verify token is still valid by calling /oauth/verify
       try {
-        const verifyUrl = `${baseUrl}/oauth/verify`;
+        const verifyUrl = `${serverBaseUrl}/oauth/verify`;
         const verifyResponse = await fetch(verifyUrl, {
           headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
         });
@@ -191,7 +216,7 @@ export class DcrAuthenticator {
 
     // For self-hosted mode, verify the token works with /oauth/verify immediately
     try {
-      const verifyUrl = `${baseUrl}/oauth/verify`;
+      const verifyUrl = `${serverBaseUrl}/oauth/verify`;
       const verifyResponse = await fetch(verifyUrl, {
         headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
       });
@@ -219,12 +244,12 @@ export class DcrAuthenticator {
   }
 
   /** Handles authentication for external (non-self-hosted) OAuth providers. */
-  private async ensureAuthenticatedExternal(baseUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  private async ensureAuthenticatedExternal(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
     // See ensureAuthenticatedSelfHosted - same loopback trust rule.
-    const allowLoopback = isLoopbackUrl(baseUrl);
+    const allowLoopback = isLoopbackUrl(mcpServerUrl);
     const issuer = requireIssuer(capabilities);
-    const resource = normalizeUrl(baseUrl);
-    const tokenKey = `tokens:${issuer}:${resource}`;
+    const { resource, storeKey } = this.resolveUrls(mcpServerUrl, capabilities);
+    const tokenKey = `tokens:${issuer}:${storeKey}`;
 
     // 1. Check for existing tokens
     let tokens = await this.loadTokens(tokenKey, issuer);
@@ -303,10 +328,15 @@ export class DcrAuthenticator {
 
   /**
    * Deletes both stored token families for a server, across every issuer they were bound to.
+   *
+   * Takes the same `mcpServerUrl` that {@link DcrAuthenticator.ensureAuthenticated}
+   * was given - keys are built from the configured URL, never from the discovered
+   * RFC 8707 resource, precisely so this can find them without doing discovery.
+   *
    * @throws CredentialBindingError if the configured store cannot enumerate keys.
    */
-  async deleteTokens(baseUrl: string): Promise<void> {
-    const suffix = `:${normalizeUrl(baseUrl)}`;
+  async deleteTokens(mcpServerUrl: string): Promise<void> {
+    const suffix = `:${normalizeUrl(mcpServerUrl)}`;
     if (!this.tokenStore.iterator) {
       throw new CredentialBindingError('Token store does not support key enumeration, which issuer-keyed credentials require');
     }
@@ -316,7 +346,7 @@ export class DcrAuthenticator {
         await this.tokenStore.delete(key);
       }
     }
-    this.logger.debug(`🗑️  Deleted tokens for ${baseUrl}`);
+    this.logger.debug(`🗑️  Deleted tokens for ${mcpServerUrl}`);
   }
 
   /** Discards a stored credential that is not bound to `issuer` (SEP-2352), including one stored before issuer binding existed. */

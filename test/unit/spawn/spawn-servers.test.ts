@@ -2,6 +2,7 @@
  * Unit tests for createServerRegistry() - core server management
  */
 
+import '../../lib/env-loader.ts';
 import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';
 import * as fs from 'fs';

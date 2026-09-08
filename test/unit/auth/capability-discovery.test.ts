@@ -3,6 +3,7 @@
  * Tests RFC 8414 .well-known endpoint probing
  */
 
+import '../../lib/env-loader.ts';
 import { probeAuthCapabilities } from '@mcp-z/client';
 import assert from 'assert';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';

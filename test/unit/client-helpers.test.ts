@@ -1,3 +1,4 @@
+import '../lib/env-loader.ts';
 import type { ManagedClient } from '@mcp-z/client';
 import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';

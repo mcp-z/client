@@ -3,6 +3,7 @@
  * Tests the complete flow: DCR registration → OAuth → Token storage → Refresh
  */
 
+import '../../lib/env-loader.ts';
 import assert from 'assert';
 import Keyv from 'keyv';
 import { probeAuthCapabilities } from '../../../src/auth/index.ts';

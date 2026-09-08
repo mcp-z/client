@@ -1,3 +1,4 @@
+import '../../lib/env-loader.ts';
 import { resolveArgsPaths, resolvePath } from '@mcp-z/client';
 import assert from 'assert';
 import * as os from 'os';
