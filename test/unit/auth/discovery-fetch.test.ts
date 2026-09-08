@@ -303,14 +303,15 @@ describe('unit/auth/discovery-fetch', () => {
       const port = await getPort();
       const server = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        // Larger than the 1MB cap enforced by readDiscoveryJson.
+        // Larger than the 1MB cap. The cap is enforced while reading the
+        // response, before it is handed back - so the fetch itself refuses
+        // it, with the same error type and message the reader reports.
         res.end(JSON.stringify({ padding: 'x'.repeat(2_000_000) }));
       });
       await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
 
       try {
-        const response = await discoveryFetch(`http://127.0.0.1:${port}/`, {}, 'test', { allowLoopback: true });
-        await assert.rejects(readDiscoveryJson(response, 'test'), (error: Error) => {
+        await assert.rejects(discoveryFetch(`http://127.0.0.1:${port}/`, {}, 'test', { allowLoopback: true }), (error: Error) => {
           assert.ok(error instanceof DiscoveryFetchError);
           assert.ok(error.message.includes('too large'), error.message);
           return true;
@@ -318,6 +319,147 @@ describe('unit/auth/discovery-fetch', () => {
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
+    });
+  });
+
+  describe('DNS pinning (DNS-rebinding TOCTOU)', () => {
+    // The threat: a hostname the remote server controls answers with a safe
+    // public address for our validation and an internal one for the request
+    // a moment later. The fix is to resolve once, validate every answer, and
+    // pin that set into the request so the transport can only dial it -
+    // modelled on the CIMD resolver's "pins the validated DNS address into
+    // the actual request" spec.
+
+    it('refuses the request when the host rebinding-swaps its answer between validation and the request', async () => {
+      const port = await getPort();
+      let hits = 0;
+      const server = http.createServer((_req, res) => {
+        hits += 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
+
+      let lookups = 0;
+      try {
+        await assert.rejects(
+          discoveryFetch(`https://rebind.invalid:${port}/`, {}, 'rebind test', {
+            timeoutMs: 3_000,
+            lookup: (_hostname, _options, callback) => {
+              lookups += 1;
+              // First answer (what validation sees): a safe public address.
+              // Second answer (the rebinding swap): the internal address the
+              // attacker wants the request to dial.
+              callback(null, lookups === 1 ? [{ address: '93.184.216.34', family: 4 }] : [{ address: '127.0.0.1', family: 4 }]);
+            },
+          }),
+          (error: Error) => {
+            assert.ok(error instanceof DiscoveryFetchError);
+            // The pinned public address is what gets dialed (and fails to
+            // connect here); the refusal is generic, with no network detail.
+            assert.strictEqual(error.message, 'Failed to fetch rebind test');
+            return true;
+          }
+        );
+        assert.strictEqual(lookups, 1, 'the rebinding answer is never consulted');
+        assert.strictEqual(hits, 0, 'the internal server is never reached');
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('pins the validated answer into the request so a later rebinding answer is never dialed', async () => {
+      const port = await getPort();
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ pinned: true }));
+      });
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
+
+      let lookups = 0;
+      try {
+        const response = await discoveryFetch(`http://localhost:${port}/`, {}, 'pin test', {
+          allowLoopback: true,
+          lookup: (_hostname, _options, callback) => {
+            lookups += 1;
+            // First answer (validation) is loopback - valid under the grant.
+            // A second answer (the rebinding swap) would be link-local.
+            callback(null, lookups === 1 ? [{ address: '127.0.0.1', family: 4 }] : [{ address: '169.254.169.254', family: 4 }]);
+          },
+        });
+        assert.strictEqual(response.ok, true);
+        const body = await readDiscoveryJson<{ pinned: boolean }>(response, 'pin test');
+        assert.strictEqual(body.pinned, true);
+        assert.strictEqual(lookups, 1, 'the transport never resolves the host a second time');
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('still refuses a hostname that resolves to a private address, even under a grant', async () => {
+      await assert.rejects(
+        discoveryFetch('https://internal.invalid/', {}, 'test', {
+          allowLoopback: true,
+          timeoutMs: 1_000,
+          lookup: (_hostname, _options, callback) => callback(null, [{ address: '10.0.0.1', family: 4 }]),
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof DiscoveryFetchError);
+          assert.ok(error.message.includes('not publicly routable'), error.message);
+          return true;
+        }
+      );
+    });
+
+    it('validates every address DNS returns, not just the first', async () => {
+      await assert.rejects(
+        discoveryFetch('https://mixed.invalid/', {}, 'test', {
+          timeoutMs: 1_000,
+          lookup: (_hostname, _options, callback) =>
+            callback(null, [
+              { address: '93.184.216.34', family: 4 },
+              { address: '127.0.0.1', family: 4 },
+            ]),
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof DiscoveryFetchError);
+          assert.ok(error.message.includes('not publicly routable'), error.message);
+          return true;
+        }
+      );
+    });
+
+    it('refuses a granted localhost whose answers are not loopback', async () => {
+      await assert.rejects(
+        discoveryFetch('http://localhost:80/', {}, 'test', {
+          allowLoopback: true,
+          timeoutMs: 1_000,
+          lookup: (_hostname, _options, callback) => callback(null, [{ address: '93.184.216.34', family: 4 }]),
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof DiscoveryFetchError);
+          assert.ok(error.message.includes('loopback'), error.message);
+          return true;
+        }
+      );
+    });
+
+    it('bounds a hanging DNS resolution with the request timeout', async () => {
+      const start = Date.now();
+      await assert.rejects(
+        discoveryFetch('https://slow.invalid/', {}, 'test', {
+          timeoutMs: 200,
+          lookup: (_hostname, _options, _callback) => {
+            /* never calls back */
+          },
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof DiscoveryFetchError);
+          assert.ok(error.message.includes('could not be resolved'), error.message);
+          return true;
+        }
+      );
+      assert.ok(Date.now() - start < 5_000, 'hanging DNS must not outlive the timeout');
     });
   });
 

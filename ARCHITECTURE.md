@@ -80,15 +80,18 @@ which enforces:
   it is refused.
 - Every redirect hop re-validated with the same grant (redirects are not
   auto-followed).
-- For a hostname target (not a literal IP, and not `localhost` under an
-  `allowLoopback` grant), DNS is resolved ourselves and every returned
-  address is checked before the original URL is handed to `fetch`. This
-  blocks the common case (attacker's hostname resolves to an internal
-  address) but does not fully close the DNS-rebinding race where the record's
-  TTL expires and the answer changes between our lookup and `fetch`'s own
-  resolution a moment later; closing that fully requires pinning the resolved
-  address at the connection layer (e.g. a custom `undici.Agent` with an
-  overridden `connect`/`lookup`), which is not implemented here.
+- For a hostname target (not a literal IP), DNS is resolved ourselves and
+  every returned address is checked, and the validated set is then **pinned
+  into the request** through a custom `lookup` on the `node:http`/`node:https`
+  connection. The request is still built against the original URL - so SNI
+  and certificate verification see the hostname - but the connection can only
+  land on an already-validated address, and the hostname is never resolved a
+  second time. This closes the DNS-rebinding race where the record's TTL
+  expires and the answer changes between our lookup and the request: a second,
+  internal answer is never consulted. `localhost` under an `allowLoopback`
+  grant is resolved and pinned the same way, and its answers must be loopback
+  for the grant to hold. (`fetch` is not used for this because it cannot take
+  a custom `lookup`.)
 - An aggressive connect/read timeout and a response body size cap enforced
   while reading, not after.
 - A single, generic error message on failure so internal network topology is

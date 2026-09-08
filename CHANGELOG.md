@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.1] - 2026-09-08
+
+### Fixed
+
+- **Discovery fetches can no longer be redirected to an internal address by a hostname that changes its answer between validation and request.** A remote server can point OAuth discovery (protected-resource and authorization-server metadata, the token and registration endpoints) at a hostname it controls. That hostname could answer with a public address when the client checked it and an internal one (loopback, link-local, or a private network address) when the client actually connected, so the request landed somewhere the check never saw. The address the client validates is now the address it connects to: a DNS answer that changes after validation can no longer steer the request. No API change; behaviour for well-behaved servers is unchanged.
+
 ## [2.2.0] - 2026-09-07
 
 ### Added
