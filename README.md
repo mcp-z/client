@@ -16,6 +16,14 @@ npm install --save-dev @mcp-z/client
 
 Requires Node.js >= 22.
 
+## Agent skill
+
+Install the repository's `mcp-z-client` skill globally when an agent will write code that consumes this package:
+
+```bash
+npx skills add https://github.com/mcp-z/client.git -g -s mcp-z-client
+```
+
 ## Quick start
 
 ```ts
