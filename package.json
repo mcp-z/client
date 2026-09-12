@@ -69,6 +69,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",

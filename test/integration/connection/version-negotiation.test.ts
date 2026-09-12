@@ -1,11 +1,4 @@
-/**
- * Unit tests for connectMcpClient() protocol version negotiation
- *
- * Drives the connect options against two local stdio fixtures:
- * - echo-stdio.mjs: a 2025-era server that answers the server/discover probe with a
- *   JSON-RPC error (fast legacy signal)
- * - modern-stdio.mjs: a 2026-07-28-era server that offers the modern revision
- */
+// Protocol negotiation through real legacy and MCP SDK v2 stdio servers.
 
 import '../../lib/env-loader.ts';
 import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
@@ -72,6 +65,18 @@ describe('connectMcpClient versionNegotiation', () => {
     try {
       assert.strictEqual(client.getProtocolEra(), 'modern');
       assert.strictEqual(client.getNegotiatedProtocolVersion(), '2026-07-28');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('should call a tool on the negotiated modern server', async () => {
+    const client = await connectMcpClient(config, 'modern', { versionNegotiation: { mode: 'auto' } });
+    try {
+      const result = await client.callTool({ name: 'echo', arguments: { message: 'round trip' } });
+      const content = result.content?.[0];
+      assert.ok(content && content.type === 'text');
+      assert.strictEqual(content.text, 'Tool echo: round trip');
     } finally {
       await client.close();
     }
