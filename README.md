@@ -11,33 +11,42 @@ Programmatic MCP client library for Node.js - connect, discover, and call tools 
 ## Install
 
 ```bash
-npm install --save-dev @mcp-z/client
+npm install @mcp-z/client
 ```
 
-Requires Node.js >= 22.
-
-## Agent skill
-
-Install the repository's `mcp-z-client` skill globally when an agent will write code that consumes this package:
-
-```bash
-npx skills add https://github.com/mcp-z/client.git -g -s mcp-z-client
-```
+Requires Node.js >= 20.
 
 ## Quick start
+
+Create a local stdio server that exposes an `echo` tool:
+
+```bash
+npm install @modelcontextprotocol/sdk zod
+```
+
+Save this as `echo-server.mjs`:
+
+```js
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+const server = new McpServer({ name: 'echo', version: '1.0.0' });
+server.registerTool('echo', { inputSchema: { message: z.string() } }, async ({ message }) => ({
+  content: [{ type: 'text', text: message }]
+}));
+await server.connect(new StdioServerTransport());
+```
+
+Connect to it and print the returned text:
 
 ```ts
 import { createServerRegistry } from '@mcp-z/client';
 
-const registry = createServerRegistry({
-  todoist: { type: 'http', url: 'https://ai.todoist.net/mcp' }
-});
-
-const client = await registry.connect('todoist');
-await client.callTool('add-tasks', {
-  tasks: [{ content: 'Learn MCP', priority: 4 }]
-});
-
+const registry = createServerRegistry({ echo: { command: 'node', args: ['echo-server.mjs'] } });
+const client = await registry.connect('echo');
+const response = await client.callTool('echo', { message: 'hello MCP' });
+console.log(response.text()); // hello MCP
 await registry.close();
 ```
 
@@ -184,12 +193,20 @@ const pinned = await registry.connect('strict-server', {
 
 After connecting, `client.getProtocolEra()` returns `'modern'` or `'legacy'` and `client.getNegotiatedProtocolVersion()` the revision the server settled on.
 
-Note: with `mode: 'auto'` against a stdio server, a legacy server that never answers the `server/discover` probe costs the full request timeout (60s) before the client falls back to the 2025 sequence. The probe ends fast when the server answers it at all — with any reply, even a "method not found" error.
+With `mode: 'auto'` against a stdio server, a legacy server that never answers the `server/discover` probe costs the full 60-second request timeout before the client falls back to the 2025 sequence. Any reply, including a "method not found" error, ends the probe.
 
 ## Requirements
 
-- Node.js >= 22
+- Node.js >= 20
 
-### Documentation
+## Agent skill
+
+If a coding agent will use this package, install its agent guidance globally:
+
+```bash
+npx skills add https://github.com/mcp-z/client.git -g -s mcp-z-client
+```
+
+## Documentation
 
 [API Docs](https://mcp-z.github.io/client)
