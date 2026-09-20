@@ -142,11 +142,27 @@ describe('createServerRegistry', () => {
     assert.ok(server?.process, 'npm launcher should resolve to a process');
     assert.strictEqual(server.config.shell, false, 'direct executables should not receive an unnecessary shell wrapper');
     const childClose = waitForChildClose(server.process);
+    const naturalExitTimeoutMs = 5000; // Match the registry's graceful shutdown window.
+    let exitTimer: NodeJS.Timeout | undefined;
+    const closedNaturally = await Promise.race([
+      childClose,
+      new Promise<undefined>((resolve) => {
+        exitTimer = setTimeout(() => resolve(undefined), naturalExitTimeoutMs);
+      }),
+    ]).finally(() => {
+      if (exitTimer) clearTimeout(exitTimer);
+    });
+
+    if (!closedNaturally) {
+      const cleanupResult = await registry.close();
+      registry = undefined;
+      assert.deepStrictEqual(cleanupResult, { timedOut: false, killedCount: 0 }, 'registry cleanup after the launcher deadline should remain graceful');
+      assert.fail(`npm launcher did not complete naturally within ${naturalExitTimeoutMs}ms`);
+    }
 
     const result = await registry.close();
-    const closed = await childClose;
     assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 });
-    assert.strictEqual(closed.code, 0, 'npm launcher should complete normally');
+    assert.strictEqual(closedNaturally.code, 0, 'npm launcher should complete normally');
     registry = undefined;
   });
 
