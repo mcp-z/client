@@ -2,7 +2,7 @@
  * existing-process-transport.ts
  *
  * MCP transport that wraps an existing child process for stdio communication.
- * Used when connecting to servers already spawned by initServers().
+ * Used when connecting to already-started processes.
  */
 
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client';
@@ -11,15 +11,23 @@ import type { ChildProcess } from 'child_process';
 
 /**
  * Transport that communicates with an existing child process via stdio.
- * Does NOT spawn a new process - uses the one provided.
+ * Closing the transport releases only its listeners; process ownership stays with the registry.
  */
 export class ExistingProcessTransport implements Transport {
-  private _process: ChildProcess;
-  private _readBuffer: ReadBuffer;
+  private readonly _process: ChildProcess;
+  private readonly _readBuffer: ReadBuffer;
   private _dataHandler: ((chunk: Buffer) => void) | null = null;
-  private _errorHandler: ((error: Error) => void) | null = null;
+  private _stdinErrorHandler: ((error: Error) => void) | null = null;
+  private _stdoutErrorHandler: ((error: Error) => void) | null = null;
+  private _stdinCloseHandler: (() => void) | null = null;
+  private _processErrorHandler: ((error: Error) => void) | null = null;
+  private _processCloseHandler: (() => void) | null = null;
+  private _started = false;
+  private _closed = false;
+  private readonly _pendingSends = new Set<(error: Error) => void>();
+  private _pendingWrites = 0;
+  private _stdinErrorObserved = false;
 
-  // Transport interface callbacks
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
@@ -33,94 +41,153 @@ export class ExistingProcessTransport implements Transport {
     this._readBuffer = new ReadBuffer();
   }
 
-  /**
-   * Start the transport - sets up stdio listeners on existing process.
-   */
   async start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Listen for process events
-      this._process.on('error', (error) => {
-        this.onerror?.(error);
-        reject(error);
-      });
+    if (this._closed) throw new Error('Transport is closed');
+    if (this._started) return;
 
-      this._process.on('close', () => {
-        this.onclose?.();
-      });
+    const { stdin, stdout } = this._process;
+    if (!stdin || !stdout) throw new Error('Child process must have stdin and stdout pipes');
+    if (this._process.exitCode !== null || this._process.signalCode !== null) {
+      this.finish();
+      throw new Error('Cannot start transport because the child process has already exited');
+    }
 
-      // Create and save data handler for close
-      this._dataHandler = (chunk: Buffer) => {
-        this._readBuffer.append(chunk);
-        this.processReadBuffer();
-      };
+    this._started = true;
+    this._dataHandler = (chunk: Buffer) => {
+      this._readBuffer.append(chunk);
+      this.processReadBuffer();
+    };
+    this._stdinErrorHandler = (error: Error) => {
+      this._stdinErrorObserved = true;
+      this.retainStdinErrorListenerUntilClose();
+      this.finish(error);
+    };
+    this._stdoutErrorHandler = (error: Error) => this.finish(error);
+    this._processErrorHandler = (error: Error) => this.finish(error);
+    this._processCloseHandler = () => this.finish();
 
-      // Create and save error handler for close
-      this._errorHandler = (error: Error) => {
-        this.onerror?.(error);
-      };
-
-      // Listen for stdout data (MCP messages)
-      this._process.stdout?.on('data', this._dataHandler);
-      this._process.stdout?.on('error', this._errorHandler);
-      this._process.stdin?.on('error', this._errorHandler);
-
-      // Process is already running - resolve immediately
-      resolve();
-    });
+    stdout.on('data', this._dataHandler);
+    stdout.on('error', this._stdoutErrorHandler);
+    stdin.on('error', this._stdinErrorHandler);
+    this._process.on('error', this._processErrorHandler);
+    this._process.on('close', this._processCloseHandler);
   }
 
-  /**
-   * Process buffered messages from stdout.
-   */
   private processReadBuffer(): void {
-    while (true) {
+    while (!this._closed) {
       try {
         const message = this._readBuffer.readMessage();
-        if (message === null) {
-          break;
-        }
+        if (message === null) return;
         this.onmessage?.(message);
       } catch (error) {
-        this.onerror?.(error as Error);
+        this.finish(error instanceof Error ? error : new Error(String(error)));
       }
     }
   }
 
-  /**
-   * Close the transport - close without killing the shared process.
-   * The process is managed by the cluster and may have other active connections.
-   */
-  async close(): Promise<void> {
-    if (this._dataHandler) {
-      this._process.stdout?.off('data', this._dataHandler);
-      this._dataHandler = null;
+  private detachListeners(): void {
+    const { stdout } = this._process;
+    if (this._dataHandler) stdout?.off('data', this._dataHandler);
+    if (this._stdoutErrorHandler) stdout?.off('error', this._stdoutErrorHandler);
+    this._stdoutErrorHandler = null;
+    if (this._processErrorHandler) this._process.off('error', this._processErrorHandler);
+    if (this._processCloseHandler) this._process.off('close', this._processCloseHandler);
+    this._dataHandler = null;
+    this._processErrorHandler = null;
+    this._processCloseHandler = null;
+    this.detachPendingWriteErrorListener();
+  }
+
+  private detachPendingWriteErrorListener(): void {
+    const stdin = this._process.stdin;
+    if (!this._closed || this._pendingWrites > 0 || !this._stdinErrorHandler) return;
+
+    if (this._stdinErrorObserved) {
+      this.retainStdinErrorListenerUntilClose();
+      return;
     }
 
-    if (this._errorHandler) {
-      this._process.stdout?.off('error', this._errorHandler);
-      this._process.stdin?.off('error', this._errorHandler);
-      this._errorHandler = null;
-    }
+    stdin?.off('error', this._stdinErrorHandler);
+    if (this._stdinCloseHandler) stdin?.off('close', this._stdinCloseHandler);
+    this._stdinErrorHandler = null;
+    this._stdinCloseHandler = null;
+  }
 
+  private retainStdinErrorListenerUntilClose(): void {
+    const stdin = this._process.stdin;
+    const errorHandler = this._stdinErrorHandler;
+    if (!stdin || !errorHandler) return;
+    if (stdin.closed) {
+      stdin.off('error', errorHandler);
+      this._stdinErrorHandler = null;
+      return;
+    }
+    if (this._stdinCloseHandler) return;
+
+    this._stdinCloseHandler = () => {
+      stdin.off('error', errorHandler);
+      this._stdinErrorHandler = null;
+      this._stdinCloseHandler = null;
+    };
+    stdin.once('close', this._stdinCloseHandler);
+  }
+
+  private finish(error?: Error): void {
+    if (this._closed) return;
+    this._closed = true;
+    this.detachListeners();
     this._readBuffer.clear();
+
+    for (const reject of this._pendingSends) reject(error ?? new Error('Transport is closed'));
+    this._pendingSends.clear();
+
+    try {
+      if (error) this.onerror?.(error);
+    } finally {
+      this.onclose?.();
+    }
   }
 
-  /**
-   * Send a message to the server via stdin.
-   */
+  async close(): Promise<void> {
+    this.finish();
+  }
+
   async send(message: JSONRPCMessage): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!this._process.stdin) {
-        reject(new Error('stdin is not available'));
-        return;
-      }
+    if (this._closed) throw new Error('Transport is closed');
+    const stdin = this._process.stdin;
+    if (!stdin || stdin.destroyed || stdin.writableEnded) throw new Error('Child process stdin is not writable');
 
-      const json = serializeMessage(message);
+    const json = serializeMessage(message);
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settle = (error?: Error | null) => {
+        if (settled) return;
+        settled = true;
+        this._pendingSends.delete(rejectPending);
+        if (error) reject(error);
+        else resolve();
+      };
+      const rejectPending = (error: Error) => settle(error);
+      this._pendingSends.add(rejectPending);
+      this._pendingWrites += 1;
 
-      if (this._process.stdin.write(json)) {
-        resolve();
-      } else {
-        this._process.stdin.once('drain', resolve);
+      try {
+        stdin.write(json, (error) => {
+          this._pendingWrites -= 1;
+          if (error) {
+            this._stdinErrorObserved = true;
+            this.retainStdinErrorListenerUntilClose();
+            if (this._closed) settle(error);
+            else this.finish(error);
+          } else {
+            settle();
+          }
+          this.detachPendingWriteErrorListener();
+        });
+      } catch (error) {
+        this._pendingWrites -= 1;
+        settle(error instanceof Error ? error : new Error(String(error)));
+        this.detachPendingWriteErrorListener();
       }
     });
   }

@@ -9,8 +9,35 @@ import http from 'node:http';
 import assert from 'assert';
 import getPort from 'get-port';
 import { DiscoveryFetchError, discoveryFetch, isLoopbackUrl, readDiscoveryJson } from '../../../src/auth/discovery-fetch.ts';
+import { withDeadline } from '../../lib/with-deadline.ts';
 
 describe('unit/auth/discovery-fetch', () => {
+  it('should abort an in-flight native HTTP request and close its socket', async () => {
+    let requestSeen!: () => void;
+    let socketClosed!: () => void;
+    const seen = new Promise<void>((resolve) => (requestSeen = resolve));
+    const closed = new Promise<void>((resolve) => (socketClosed = resolve));
+    const server = http.createServer((request) => {
+      requestSeen();
+      request.socket.once('close', socketClosed);
+    });
+    const port = await getPort();
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const controller = new AbortController();
+    const reason = new Error('discovery cancelled');
+
+    try {
+      const pending = discoveryFetch(`http://127.0.0.1:${port}/.well-known/oauth-authorization-server`, { signal: controller.signal }, 'test discovery', { allowLoopback: true });
+      await withDeadline(seen, 1000);
+      controller.abort(reason);
+      await assert.rejects(withDeadline(pending, 1000), (error: unknown) => error === reason);
+      await withDeadline(closed, 1000);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   describe('scheme enforcement', () => {
     it('should reject http:// for a non-loopback remote discovery URL', async () => {
       await assert.rejects(discoveryFetch('http://example.com/.well-known/oauth-authorization-server', {}, 'test'), (error: Error) => {

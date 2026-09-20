@@ -95,6 +95,37 @@
         "cwd": {
           "type": "string",
           "description": "Working directory"
+        },
+        "stop": {
+          "$ref": "#/definitions/StopCommandConfig",
+          "description": "Optional application-specific cooperative shutdown command for a registry-owned HTTP server"
+        }
+      },
+      "required": ["command"],
+      "additionalProperties": false
+    },
+    "StopCommandConfig": {
+      "type": "object",
+      "description": "Command run once by registry.close() before waiting for an owned HTTP server to exit. The application must implement the shutdown mechanism; MCP HTTP defines no server shutdown operation.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command that requests application-specific server shutdown"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command arguments"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables for the stop command"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for the stop command"
         }
       },
       "required": ["command"],

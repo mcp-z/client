@@ -1,6 +1,6 @@
 {
   "name": "@mcp-z/client",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "Programmatic MCP client library for Node.js - connect, discover, and call tools on Model Context Protocol servers.",
   "keywords": [
     "mcp",
@@ -53,16 +53,17 @@
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
     "prepublishOnly": "node scripts/require-dist-tag.cjs && tsds validate",
-    "test": "tsds test:node --no-timeouts",
-    "test:ci": "tsds test:node --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
-    "test:ci:engines": "nvu engines tsds test:node --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
-    "test:engines": "nvu engines tsds test:node --no-timeouts",
+    "test": "tsds test:node --require test/lib/env-loader.ts --no-timeouts",
+    "test:ci": "tsds test:node --require test/lib/env-loader.ts --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
+    "test:ci:engines": "nvu engines tsds test:node --require test/lib/env-loader.ts --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
+    "test:engines": "nvu engines tsds test:node --require test/lib/env-loader.ts --no-timeouts",
     "version": "tsds version"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
+    "cross-spawn": "^7.0.6",
     "get-port": "5.1.1",
     "ipaddr.js": "^2.5.0",
     "keyv": "^5.0.0",
@@ -72,6 +73,7 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "@types/cross-spawn": "^6.0.6",
     "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
@@ -80,6 +82,7 @@
     "node-version-use": "^2.4.7",
     "ts-dev-stack": "^1.22.1",
     "tsds-config": "^1.0.4",
+    "tsds-lib": "^1.22.6",
     "zod": "^4.0.0"
   },
   "engines": {

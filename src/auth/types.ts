@@ -150,12 +150,16 @@ export interface DcrRegistrationOptions {
    * remote-controlled AS metadata). Defaults to `false`.
    */
   allowLoopback?: boolean;
+  /** Cancels an in-progress registration request. */
+  signal?: AbortSignal;
 }
 
 /**
  * Options for OAuth authorization flow
  */
 export interface OAuthFlowOptions {
+  /** Cancels an in-progress authorization and closes its callback listener. */
+  signal?: AbortSignal;
   /** Port for OAuth callback listener (required - use get-port to find available port) */
   port: number;
   /** Issuer identifier discovered before the flow starts; the `iss` in the authorization response must match it (RFC 9207) */

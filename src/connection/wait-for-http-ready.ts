@@ -13,18 +13,22 @@
  * @returns Promise that resolves when server is ready
  * @throws Error if server doesn't become ready within timeout
  */
-export async function waitForHttpReady(url: string, timeoutMs = 30000): Promise<void> {
+export async function waitForHttpReady(url: string, timeoutMs = 30000, signal?: AbortSignal): Promise<void> {
   const start = Date.now();
   const maxRetries = Math.ceil(timeoutMs / 100); // Check every 100ms
 
   for (let i = 0; i < maxRetries; i++) {
+    throwIfAborted(signal);
     try {
       // Use HEAD request to check server is responding
-      const response = await fetch(url, {
-        method: 'HEAD',
-        headers: { Connection: 'close' },
-        signal: AbortSignal.timeout(500), // 500ms per attempt
-      });
+      const response = await awaitWithSignal(
+        fetch(url, {
+          method: 'HEAD',
+          headers: { Connection: 'close' },
+          signal: AbortSignal.timeout(500), // 500ms per attempt
+        }),
+        signal
+      );
 
       // Server is responding if we get any HTTP status
       if (response.status >= 200 && response.status < 500) {
@@ -42,8 +46,22 @@ export async function waitForHttpReady(url: string, timeoutMs = 30000): Promise<
     }
 
     // Wait before retry
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await awaitWithSignal(new Promise<void>((resolve) => setTimeout(resolve, 100)), signal);
   }
 
   throw new Error(`HTTP server ${url} not ready after ${timeoutMs}ms`);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('HTTP readiness check was cancelled');
+}
+
+function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('HTTP readiness check was cancelled'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('HTTP readiness check was cancelled'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }

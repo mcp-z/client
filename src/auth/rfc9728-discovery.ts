@@ -4,7 +4,7 @@
  */
 
 import { joinWellKnown, normalizeUrl } from '../lib/url-utils.ts';
-import { discoveryFetch, isLoopbackUrl, readDiscoveryJson } from './discovery-fetch.ts';
+import { discoveryFetch, isLoopbackUrl, readDiscoveryJson, throwIfAborted } from './discovery-fetch.ts';
 import type { AuthorizationServerMetadata, ProtectedResourceMetadata } from './types.ts';
 
 /** Returns `url`'s origin (protocol + host), or the original string if it doesn't parse. */
@@ -33,13 +33,15 @@ function getPath(url: string): string {
  * @param resourceUrl - URL of the protected resource (e.g. `https://ai.todoist.net/mcp`).
  * @returns Discovered metadata, or `null` if none is found.
  */
-export async function discoverProtectedResourceMetadata(resourceUrl: string): Promise<ProtectedResourceMetadata | null> {
+export async function discoverProtectedResourceMetadata(resourceUrl: string, options: { signal?: AbortSignal } = {}): Promise<ProtectedResourceMetadata | null> {
+  const { signal } = options;
   try {
+    throwIfAborted(signal);
     const normalizedResourceUrl = normalizeUrl(resourceUrl);
     // resourceUrl is the server the caller configured (never remote-supplied);
     // its loopback-ness is the trust signal every fetch below relies on.
     const allowLoopback = isLoopbackUrl(normalizedResourceUrl);
-    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(normalizedResourceUrl, allowLoopback);
+    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(normalizedResourceUrl, allowLoopback, signal);
     if (headerMetadata) return headerMetadata;
 
     // Strategy 0: Try path-local well-known (supports path-prefixed deployments like /outlook)
@@ -50,6 +52,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
         {
           method: 'GET',
           headers: { Accept: 'application/json', Connection: 'close' },
+          signal,
         },
         'protected resource metadata (path-local)',
         { allowLoopback }
@@ -58,6 +61,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
         return await readDiscoveryJson<ProtectedResourceMetadata>(response, 'protected resource metadata (path-local)');
       }
     } catch {
+      throwIfAborted(signal);
       // Continue to origin-based discovery
     }
 
@@ -73,6 +77,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
         {
           method: 'GET',
           headers: { Accept: 'application/json', Connection: 'close' },
+          signal,
         },
         'protected resource metadata (root)',
         { allowLoopback }
@@ -104,6 +109,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
               {
                 method: 'GET',
                 headers: { Accept: 'application/json', Connection: 'close' },
+                signal,
               },
               'protected resource metadata (sub-path)',
               { allowLoopback }
@@ -112,6 +118,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
               return await readDiscoveryJson<ProtectedResourceMetadata>(subPathResponse, 'protected resource metadata (sub-path)');
             }
           } catch {
+            throwIfAborted(signal);
             // Sub-path failed, use root metadata
           }
 
@@ -121,6 +128,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
         // Otherwise, try sub-path location before giving up
       }
     } catch {
+      throwIfAborted(signal);
       // Continue to sub-path location
     }
 
@@ -135,6 +143,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
           {
             method: 'GET',
             headers: { Accept: 'application/json', Connection: 'close' },
+            signal,
           },
           'protected resource metadata (sub-path)',
           { allowLoopback }
@@ -144,6 +153,7 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
           return await readDiscoveryJson<ProtectedResourceMetadata>(response, 'protected resource metadata (sub-path)');
         }
       } catch {
+        throwIfAborted(signal);
         // Fall through to return null
       }
     }
@@ -151,16 +161,19 @@ export async function discoverProtectedResourceMetadata(resourceUrl: string): Pr
     // Neither location found or resource didn't match
     return null;
   } catch (_error) {
+    throwIfAborted(signal);
     // Network error, invalid URL, or other failure
     return null;
   }
 }
 
-async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, allowLoopback: boolean): Promise<ProtectedResourceMetadata | null> {
+async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, allowLoopback: boolean, signal?: AbortSignal): Promise<ProtectedResourceMetadata | null> {
   try {
+    throwIfAborted(signal);
     const response = await fetch(resourceUrl, {
       method: 'GET',
       headers: { Accept: 'application/json', Connection: 'close' },
+      signal,
     });
 
     let header = response.headers.get('www-authenticate');
@@ -169,6 +182,7 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, 
         method: 'POST',
         headers: { Accept: 'application/json', Connection: 'close', 'Content-Type': 'application/json' },
         body: '{}',
+        signal,
       });
       header = postResponse.headers.get('www-authenticate');
     }
@@ -186,6 +200,7 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, 
       {
         method: 'GET',
         headers: { Accept: 'application/json', Connection: 'close' },
+        signal,
       },
       'resource_metadata URL',
       { allowLoopback }
@@ -197,6 +212,7 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, 
 
     return await readDiscoveryJson<ProtectedResourceMetadata>(metadataResponse, 'resource_metadata URL');
   } catch (_error) {
+    throwIfAborted(signal);
     return null;
   }
 }
@@ -209,9 +225,10 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, 
  * @param options.allowLoopback - Loopback trust grant computed from the server the caller is actually talking to, never from `authServerUrl` itself. Defaults to `false`.
  * @returns Discovered metadata, or `null` if none is found.
  */
-export async function discoverAuthorizationServerMetadata(authServerUrl: string, options: { allowLoopback?: boolean } = {}): Promise<AuthorizationServerMetadata | null> {
-  const { allowLoopback = false } = options;
+export async function discoverAuthorizationServerMetadata(authServerUrl: string, options: { allowLoopback?: boolean; signal?: AbortSignal } = {}): Promise<AuthorizationServerMetadata | null> {
+  const { allowLoopback = false, signal } = options;
   try {
+    throwIfAborted(signal);
     const normalizedAuthServerUrl = normalizeUrl(authServerUrl);
     const localWellKnownUrl = joinWellKnown(normalizedAuthServerUrl, '/.well-known/oauth-authorization-server');
     const localResponse = await discoveryFetch(
@@ -219,6 +236,7 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string,
       {
         method: 'GET',
         headers: { Accept: 'application/json', Connection: 'close' },
+        signal,
       },
       'authorization server metadata (path-local)',
       { allowLoopback }
@@ -236,6 +254,7 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string,
       {
         method: 'GET',
         headers: { Accept: 'application/json', Connection: 'close' },
+        signal,
       },
       'authorization server metadata',
       { allowLoopback }
@@ -247,6 +266,7 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string,
 
     return await readDiscoveryJson<AuthorizationServerMetadata>(response, 'authorization server metadata');
   } catch (_error) {
+    throwIfAborted(signal);
     return null;
   }
 }
@@ -257,11 +277,14 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string,
  * @param resourceUrl - URL of the protected resource
  * @returns Issuer URL if present in WWW-Authenticate header, null otherwise
  */
-export async function discoverAuthorizationServerIssuer(resourceUrl: string): Promise<string | null> {
+export async function discoverAuthorizationServerIssuer(resourceUrl: string, options: { signal?: AbortSignal } = {}): Promise<string | null> {
+  const { signal } = options;
   try {
+    throwIfAborted(signal);
     const response = await fetch(resourceUrl, {
       method: 'GET',
       headers: { Accept: 'application/json', Connection: 'close' },
+      signal,
     });
 
     const header = response.headers.get('www-authenticate');
@@ -272,6 +295,7 @@ export async function discoverAuthorizationServerIssuer(resourceUrl: string): Pr
 
     return match[1] ?? null;
   } catch (_error) {
+    throwIfAborted(signal);
     return null;
   }
 }

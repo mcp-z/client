@@ -86,12 +86,23 @@ const registry = createServerRegistry(
     api: {
       type: 'http',
       url: 'http://localhost:3000/mcp',
-      start: { command: 'node', args: ['server.js'] }
+      start: {
+        command: 'node',
+        args: ['server.js'],
+        stop: {
+          command: 'node',
+          args: ['request-server-stop.js', 'http://localhost:3000/admin/shutdown']
+        }
+      }
     }
   },
   { dialects: ['start'] }
 );
 ```
+
+`start.stop` is an optional application-specific cooperative shutdown command for a server started by this registry. It runs once during `registry.close()`, before the registry waits for the owned process to close. The stop command must use a mechanism implemented by that server; MCP HTTP has no server shutdown operation. Commands use argument arrays without a shell. `timeoutMs` bounds each cooperative wait for the stop command and owned process (five seconds by default); emergency termination has its own bounded wait. Without a stop command there is no portable HTTP shutdown protocol: POSIX requests the configured signal, while Windows waits for the direct child and then uses emergency termination. External HTTP servers and client lease closure do not run the stop command.
+
+Stdio shutdown sends EOF to the owned process first. If it remains open, POSIX sends the requested signal and waits again; Windows proceeds to bounded termination of the direct child. POSIX shutdown tracks the detached process group. Windows descendant ownership is not verified, so a wrapper that exits while leaving descendants may leave those processes running. `timedOut` reports a missed cooperative window, and `killedCount` counts direct-child or process-group emergency terminations.
 
 ## API overview
 

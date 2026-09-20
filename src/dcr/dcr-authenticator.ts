@@ -120,14 +120,15 @@ export class DcrAuthenticator {
    *   capabilities
    * );
    */
-  async ensureAuthenticated(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  async ensureAuthenticated(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
+    throwIfAborted(signal);
     // Auto-detect server mode
     const isSelfHosted = await this.detectSelfHostedMode(mcpServerUrl);
 
     if (isSelfHosted) {
-      return this.ensureAuthenticatedSelfHosted(mcpServerUrl, capabilities);
+      return this.ensureAuthenticatedSelfHosted(mcpServerUrl, capabilities, signal);
     }
-    return this.ensureAuthenticatedExternal(mcpServerUrl, capabilities);
+    return this.ensureAuthenticatedExternal(mcpServerUrl, capabilities, signal);
   }
 
   /**
@@ -157,7 +158,7 @@ export class DcrAuthenticator {
    * Handle authentication for self-hosted DCR servers
    * Self-hosted servers manage their own token storage via /oauth/verify
    */
-  private async ensureAuthenticatedSelfHosted(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  private async ensureAuthenticatedSelfHosted(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
     // Loopback trust for every discovery-derived fetch below, computed from
     // the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
     const allowLoopback = isLoopbackUrl(mcpServerUrl);
@@ -174,6 +175,7 @@ export class DcrAuthenticator {
         const verifyUrl = `${serverBaseUrl}/oauth/verify`;
         const verifyResponse = await fetch(verifyUrl, {
           headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
+          signal,
         });
 
         if (verifyResponse.ok) {
@@ -207,10 +209,11 @@ export class DcrAuthenticator {
     const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
       redirectUri: this.redirectUri,
       allowLoopback,
+      signal,
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback);
+    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback, signal);
 
     tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
 
@@ -219,6 +222,7 @@ export class DcrAuthenticator {
       const verifyUrl = `${serverBaseUrl}/oauth/verify`;
       const verifyResponse = await fetch(verifyUrl, {
         headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
+        signal,
       });
 
       if (!verifyResponse.ok) {
@@ -244,7 +248,7 @@ export class DcrAuthenticator {
   }
 
   /** Handles authentication for external (non-self-hosted) OAuth providers. */
-  private async ensureAuthenticatedExternal(mcpServerUrl: string, capabilities: AuthCapabilities): Promise<TokenSet> {
+  private async ensureAuthenticatedExternal(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
     // See ensureAuthenticatedSelfHosted - same loopback trust rule.
     const allowLoopback = isLoopbackUrl(mcpServerUrl);
     const issuer = requireIssuer(capabilities);
@@ -260,7 +264,7 @@ export class DcrAuthenticator {
         this.logger.debug('🔄 Refreshing access token...');
 
         try {
-          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, resource, allowLoopback);
+          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, resource, allowLoopback, signal);
           await this.tokenStore.set(tokenKey, { ...tokens, issuer });
           this.logger.debug('✅ Token refreshed successfully');
         } catch (_error) {
@@ -291,10 +295,11 @@ export class DcrAuthenticator {
     const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
       redirectUri: this.redirectUri,
       allowLoopback,
+      signal,
     });
 
     // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback);
+    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback, signal);
 
     tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
 
@@ -310,7 +315,7 @@ export class DcrAuthenticator {
    * @param resource - Canonical resource server URI, audience-binding the token (RFC 8707).
    * @param allowLoopback - Loopback trust grant computed from the server actually being talked to (SSRF mitigation, see discovery-fetch.ts). Defaults to `false`.
    */
-  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, resource: string, allowLoopback = false): Promise<TokenSet> {
+  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, resource: string, allowLoopback = false, signal?: AbortSignal): Promise<TokenSet> {
     if (!tokenEndpoint) {
       throw new Error('Token endpoint not available for refresh');
     }
@@ -323,7 +328,7 @@ export class DcrAuthenticator {
       throw new Error('Client credentials not available for refresh');
     }
 
-    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, resource, allowLoopback);
+    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, resource, allowLoopback, signal);
   }
 
   /**
@@ -360,7 +365,7 @@ export class DcrAuthenticator {
     return undefined;
   }
 
-  private buildFlowOptions(port: number, capabilities: AuthCapabilities, issuer: string, resource: string, allowLoopback: boolean): OAuthFlowOptions {
+  private buildFlowOptions(port: number, capabilities: AuthCapabilities, issuer: string, resource: string, allowLoopback: boolean, signal?: AbortSignal): OAuthFlowOptions {
     const flowOptions: OAuthFlowOptions = {
       port,
       issuer,
@@ -370,6 +375,7 @@ export class DcrAuthenticator {
       pkce: true,
       logger: this.logger,
       allowLoopback,
+      ...(signal && { signal }),
       authorizationResponseIssSupported: capabilities.authorizationResponseIssSupported ?? false,
     };
     if (capabilities.scopes) {
@@ -377,4 +383,8 @@ export class DcrAuthenticator {
     }
     return flowOptions;
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Authentication was cancelled');
 }

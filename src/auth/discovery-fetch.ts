@@ -19,6 +19,11 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 5;
 const MAX_BODY_BYTES = 1_000_000; // 1 MB - discovery documents are small JSON
 
+/** Preserve cancellation while discovery falls back across endpoints. */
+export function throwIfAborted(signal?: AbortSignal | null): void {
+  signal?.throwIfAborted();
+}
+
 type LookupRecord = { address: string; family: number };
 /** DNS implementation, injectable for deterministic tests. Same contract as `dns.lookup` with `{ all: true, verbatim: true }`. */
 type Lookup = (hostname: string, options: { all: true; verbatim: true }, callback: (error: NodeJS.ErrnoException | null, addresses: LookupRecord[]) => void) => void;
@@ -102,29 +107,34 @@ function assertSafeUrl(rawUrl: string, context: string, allowLoopback: boolean):
   return url;
 }
 
-function lookupAll(hostname: string, lookup: Lookup, timeoutMs: number): Promise<LookupRecord[]> {
+function lookupAll(hostname: string, lookup: Lookup, timeoutMs: number, signal?: AbortSignal | null): Promise<LookupRecord[]> {
   return new Promise((resolve, reject) => {
     let settled = false;
+    const finish = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      signal?.removeEventListener('abort', onAbort);
+      complete();
+    };
+    const onAbort = (): void => finish(() => reject(signal?.reason));
     const deadline = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        reject(new Error('DNS resolution timed out'));
-      }
+      finish(() => reject(new Error('DNS resolution timed out')));
     }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     try {
       lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        if (error || addresses.length === 0) reject(new Error('DNS resolution failed'));
-        else resolve(addresses);
+        finish(() => {
+          if (error || addresses.length === 0) reject(new Error('DNS resolution failed'));
+          else resolve(addresses);
+        });
       });
     } catch {
-      if (!settled) {
-        settled = true;
-        clearTimeout(deadline);
-        reject(new Error('DNS resolution failed'));
-      }
+      finish(() => reject(new Error('DNS resolution failed')));
     }
   });
 }
@@ -136,7 +146,8 @@ function lookupAll(hostname: string, lookup: Lookup, timeoutMs: number): Promise
  * TOCTOU: the transport can only dial addresses that were already validated,
  * and it never resolves the hostname a second time.
  */
-async function resolveSafeAddresses(url: URL, context: string, allowLoopback: boolean, lookup: Lookup, timeoutMs: number): Promise<LookupRecord[]> {
+async function resolveSafeAddresses(url: URL, context: string, allowLoopback: boolean, lookup: Lookup, timeoutMs: number, signal?: AbortSignal | null): Promise<LookupRecord[]> {
+  throwIfAborted(signal);
   const host = stripBrackets(url.hostname);
   if (isIP(host)) return [{ address: host, family: host.includes(':') ? 6 : 4 }]; // literal IP already fully checked in assertSafeUrl
 
@@ -147,8 +158,9 @@ async function resolveSafeAddresses(url: URL, context: string, allowLoopback: bo
 
   let addresses: LookupRecord[];
   try {
-    addresses = await lookupAll(host, lookup, timeoutMs);
-  } catch {
+    addresses = await lookupAll(host, lookup, timeoutMs, signal);
+  } catch (_error) {
+    throwIfAborted(signal);
     throw new DiscoveryFetchError(`Refusing to fetch ${context}: host could not be resolved`);
   }
 
@@ -232,6 +244,7 @@ function toResponse(status: number, statusText: string, headers: http.IncomingHt
 }
 
 async function requestOnce(url: URL, init: RequestInit, context: string, addresses: LookupRecord[], timeoutMs: number): Promise<Response> {
+  throwIfAborted(init.signal);
   let body: Buffer | undefined;
   try {
     body = await toRequestBody(init.body);
@@ -240,17 +253,29 @@ async function requestOnce(url: URL, init: RequestInit, context: string, address
   }
 
   const transport = url.protocol === 'https:' ? https : http;
-  const options: http.RequestOptions = { method: (init.method ?? 'GET').toUpperCase(), headers: toRequestHeaders(init), agent: false, lookup: pinnedLookup(addresses) };
+  const options: http.RequestOptions = { method: (init.method ?? 'GET').toUpperCase(), headers: toRequestHeaders(init), agent: false, lookup: pinnedLookup(addresses), signal: init.signal ?? undefined };
 
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
     let req: http.ClientRequest | undefined;
     let res: http.IncomingMessage | undefined;
+    const signal = init.signal ?? undefined;
+    const cleanup = (): void => {
+      clearTimeout(deadline);
+      signal?.removeEventListener('abort', onAbort);
+    };
     const fail = (message: string): void => {
       if (!settled) {
         settled = true;
-        clearTimeout(deadline);
+        cleanup();
         reject(new DiscoveryFetchError(message));
+      }
+    };
+    const failWith = (error: unknown): void => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(error);
       }
     };
     const deadline = setTimeout(() => {
@@ -258,6 +283,16 @@ async function requestOnce(url: URL, init: RequestInit, context: string, address
       req?.destroy();
       fail(`Failed to fetch ${context}`);
     }, timeoutMs);
+    const onAbort = (): void => {
+      res?.destroy();
+      req?.destroy();
+      failWith(signal?.reason);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
 
     try {
       req = transport.request(url, options, (response) => {
@@ -284,7 +319,7 @@ async function requestOnce(url: URL, init: RequestInit, context: string, address
         response.once('end', () => {
           if (settled) return;
           settled = true;
-          clearTimeout(deadline);
+          cleanup();
           resolve(toResponse(status, statusText, response.headers, Buffer.concat(chunks)));
         });
       });
@@ -299,7 +334,8 @@ async function requestOnce(url: URL, init: RequestInit, context: string, address
 }
 
 async function fetchOnce(url: URL, init: RequestInit, context: string, allowLoopback: boolean, timeoutMs: number, lookup: Lookup): Promise<Response> {
-  const addresses = await resolveSafeAddresses(url, context, allowLoopback, lookup, timeoutMs);
+  throwIfAborted(init.signal);
+  const addresses = await resolveSafeAddresses(url, context, allowLoopback, lookup, timeoutMs, init.signal);
   return requestOnce(url, init, context, addresses, timeoutMs);
 }
 
@@ -336,6 +372,7 @@ export interface DiscoveryFetchOptions {
  * @param options - See `DiscoveryFetchOptions`.
  */
 export async function discoveryFetch(rawUrl: string, init: RequestInit = {}, context = 'discovery URL', options: DiscoveryFetchOptions = {}): Promise<Response> {
+  throwIfAborted(init.signal);
   const { allowLoopback = false, timeoutMs = DEFAULT_TIMEOUT_MS, lookup = dns.lookup as unknown as Lookup } = options;
 
   let url = assertSafeUrl(rawUrl, context, allowLoopback);

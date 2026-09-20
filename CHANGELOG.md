@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.3.0] - 2026-09-20
+
+### Added
+
+- `start.stop` lets an owned HTTP server declare a structured, shell-free command for its application-specific shutdown mechanism. The registry runs it once during `registry.close()` and then waits for the server to exit. MCP HTTP does not define a shutdown request, so the server must implement the mechanism. The stop command does not run for external servers or when a client releases a shared-server lease.
+
+### Changed
+
+- `registry.close()` sends stdin EOF before escalating stdio shutdown, waits for actual child closure, shares concurrent close completion, attempts cleanup of every owned resource, and reports teardown errors. Cooperative shutdown returns `timedOut: false` and `killedCount: 0`. On Windows, emergency termination can target only the direct child; a descendant left running after a wrapper exits is outside the ownership guarantee. POSIX shutdown continues to track the detached process group.
+
+### Fixed
+
+- OAuth discovery and transport connection deadlines now abort active HTTP requests and wait for bounded cleanup. Cleanup failures remain visible to callers.
+
 ## [2.2.4] - 2026-09-20
 
 ### Fixed

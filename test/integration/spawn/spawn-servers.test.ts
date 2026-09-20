@@ -5,11 +5,13 @@
 import '../../lib/env-loader.ts';
 import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';
+import { type ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
+import getPort from 'get-port';
 import * as path from 'path';
 import * as process from 'process';
 import { fileURLToPath } from 'url';
-import { waitForOutput } from '../../lib/wait-for-output.ts';
+import type { StartConfig } from '../../../src/types.ts';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -36,12 +38,39 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
   }
 }
 
+function waitForChildClose(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  return new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
+}
+
+async function waitForHttpReady(url: string, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  let lastError: Error | undefined;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+      lastError = new Error(`HTTP fixture returned ${response.status}`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`HTTP fixture did not become ready at ${url}: ${lastError?.message ?? 'no response'}`);
+}
+
 function forceStopProcess(pid: number): void {
   try {
     process.kill(pid, 'SIGKILL');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
   }
+}
+
+function nestedErrorMessages(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const nested = error instanceof AggregateError ? error.errors.map((entry) => nestedErrorMessages(entry)).join('; ') : '';
+  const cause = 'cause' in error ? nestedErrorMessages(error.cause) : '';
+  return `${error.message}${nested ? `; ${nested}` : ''}${cause ? `; ${cause}` : ''}`;
 }
 
 describe('createServerRegistry', () => {
@@ -72,7 +101,7 @@ describe('createServerRegistry', () => {
     const server = registry.servers.get('my-stdio');
     assert.ok(server, 'Server should exist');
     assert.ok(server.process, 'Server should have process');
-    assert.ok(!server.process.killed, 'Process should be running');
+    assert.strictEqual(server.process.exitCode, null, 'Process should be running');
 
     await registry.close();
     registry = undefined;
@@ -100,10 +129,24 @@ describe('createServerRegistry', () => {
     // Both processes should be running
     const server1 = registry.servers.get('server-1');
     const server2 = registry.servers.get('server-2');
-    assert.ok(server1?.process && !server1.process.killed, 'Server 1 should be running');
-    assert.ok(server2?.process && !server2.process.killed, 'Server 2 should be running');
+    assert.ok(server1?.process && server1.process.exitCode === null && server1.process.signalCode === null, 'Server 1 should be running');
+    assert.ok(server2?.process && server2.process.exitCode === null && server2.process.signalCode === null, 'Server 2 should be running');
 
     await registry.close();
+    registry = undefined;
+  });
+
+  it('should run command launchers without forcing a shell for direct executables', async () => {
+    registry = createServerRegistry({ npm: { command: 'npm', args: ['--version'] } }, { cwd: projectRoot });
+    const server = registry.servers.get('npm');
+    assert.ok(server?.process, 'npm launcher should resolve to a process');
+    assert.strictEqual(server.config.shell, false, 'direct executables should not receive an unnecessary shell wrapper');
+    const childClose = waitForChildClose(server.process);
+
+    const result = await registry.close();
+    const closed = await childClose;
+    assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 });
+    assert.strictEqual(closed.code, 0, 'npm launcher should complete normally');
     registry = undefined;
   });
 
@@ -123,7 +166,7 @@ describe('createServerRegistry', () => {
 
     assert.ok(registry.servers.has('my-local'), 'Should have my-local server');
     const server = registry.servers.get('my-local');
-    assert.ok(server?.process && !server.process.killed, 'Server should be running');
+    assert.ok(server?.process && server.process.exitCode === null && server.process.signalCode === null, 'Server should be running');
 
     await registry.close();
     registry = undefined;
@@ -147,7 +190,7 @@ describe('createServerRegistry', () => {
     const server = registry.servers.get('my-stdio');
     assert.ok(server?.process, 'Server should exist');
     // Note: Can't easily verify env vars were passed, but we can verify process spawned
-    assert.ok(!server.process.killed, 'Process should be running with custom env');
+    assert.strictEqual(server.process.exitCode, null, 'Process should be running with custom env');
 
     await registry.close();
     registry = undefined;
@@ -165,52 +208,342 @@ describe('createServerRegistry', () => {
     );
 
     const server = registry.servers.get('my-stdio');
-    assert.ok(server?.process && !server.process.killed, 'Process should be running before close');
+    assert.ok(server?.process, 'Process should exist before close');
+    const childClose = waitForChildClose(server.process);
 
-    // Graceful close
     const result = await registry.close();
-    assert.strictEqual(result.timedOut, false, 'Close should complete without timeout');
-    assert.strictEqual(result.killedCount, 0, 'Should not need to force-kill any processes');
+    const closed = await childClose;
+    assert.strictEqual(result.timedOut, false, 'stdin EOF should close the healthy server before timeout');
+    assert.strictEqual(result.killedCount, 0, 'healthy stdio shutdown should not force-terminate the process');
+    assert.strictEqual(closed.code, 0, 'server should exit successfully after stdin EOF');
+    assert.strictEqual(server.process.stdin?.destroyed, true, 'stdin should be closed');
+    assert.strictEqual(server.process.stdout?.destroyed, true, 'stdout should be closed after the child close event');
+    assert.strictEqual(server.process.stderr?.destroyed, true, 'stderr should be closed after the child close event');
 
-    assert.ok(server.process.killed || server.process.exitCode !== null, 'Process should be stopped after close');
     registry = undefined;
   });
 
-  it('should stop a real Windows shell-launched server process', async () => {
+  it('should cooperatively stop an owned HTTP server and await stream closure', async () => {
+    const port = await getPort();
+    const shutdownUrl = `http://127.0.0.1:${port}/__mcpz/shutdown`;
     const serverRegistry = createServerRegistry(
       {
         'long-lived-http': {
-          command: 'node',
-          args: ['test/lib/servers/long-lived-http.mjs'],
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          start: {
+            command: 'node',
+            args: ['test/lib/servers/long-lived-http.mjs', '--port', String(port)],
+            stop: {
+              command: 'node',
+              args: ['test/lib/servers/request-http-stop.mjs', shutdownUrl],
+            },
+          },
         },
       },
-      { cwd: projectRoot }
+      { cwd: projectRoot, dialects: ['start'] }
     );
     const server = serverRegistry.servers.get('long-lived-http');
-    assert.ok(server?.process.stdout, 'Server stdout should be piped');
-
-    let output = '';
-    server.process.stdout.on('data', (chunk: Buffer) => {
-      output += chunk.toString();
-    });
-
-    let serverPid: number | undefined;
+    assert.ok(server?.process.pid, 'owned HTTP server should have a process ID');
+    const serverPid = server.process.pid;
+    const childClose = waitForChildClose(server.process);
     try {
-      await waitForOutput(() => output, /^READY:(\d+)$/m, 5000);
-      const match = output.match(/^READY:(\d+)$/m);
-      assert.ok(match, 'Server should report its process ID');
-      serverPid = Number(match[1]);
+      await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
 
-      const result = await serverRegistry.close();
-      assert.strictEqual(result.timedOut, false, 'Server process tree should close before timeout');
+      const firstClose = serverRegistry.close('SIGINT', { timeoutMs: 1000 });
+      const concurrentClose = serverRegistry.close('SIGTERM', { timeoutMs: 100 });
+      assert.strictEqual(concurrentClose, firstClose, 'concurrent shutdown must not issue the HTTP stop command twice');
+      const result = await firstClose;
+      const closed = await childClose;
+      assert.strictEqual(result.timedOut, false, 'the configured stop command should close the server before timeout');
+      assert.strictEqual(result.killedCount, 0, 'cooperative HTTP shutdown should not force-terminate the process');
+      assert.strictEqual(closed.code, 0, 'HTTP server should exit successfully after its shutdown endpoint drains');
       await waitForProcessExit(serverPid, 2000);
     } finally {
       await serverRegistry.close();
-      if (serverPid !== undefined && isProcessAlive(serverPid)) {
+      if (isProcessAlive(serverPid)) {
         forceStopProcess(serverPid);
         await waitForProcessExit(serverPid, 2000);
       }
     }
+  });
+
+  it('should preserve an external HTTP server when its registry closes', async () => {
+    const port = await getPort();
+    const url = `http://127.0.0.1:${port}/mcp`;
+    const externalProcess = spawn(process.execPath, [path.join(projectRoot, 'test/lib/servers/long-lived-http.mjs'), '--port', String(port)], {
+      stdio: 'ignore',
+      detached: process.platform !== 'win32',
+    });
+    const childClose = waitForChildClose(externalProcess);
+    const externalRegistry = createServerRegistry({ external: { type: 'http', url } }, { cwd: projectRoot, dialects: ['start'] });
+
+    try {
+      await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+      assert.deepStrictEqual(await externalRegistry.close(), { timedOut: false, killedCount: 0 });
+      assert.strictEqual(externalProcess.exitCode, null, 'closing a registry must not stop an external server');
+      const response = await fetch(url);
+      assert.strictEqual(response.status, 200, 'external server should remain reachable after registry close');
+    } finally {
+      if (externalProcess.exitCode === null && externalProcess.signalCode === null) externalProcess.kill('SIGKILL');
+      await childClose;
+    }
+  });
+
+  it('should cooperatively stop owned HTTP servers without a shell wrapper', async () => {
+    const port = await getPort();
+    const start: StartConfig = {
+      command: 'node',
+      args: ['test/lib/servers/long-lived-http.mjs', '--port', String(port)],
+    };
+    if (process.platform === 'win32') {
+      start.stop = {
+        command: 'node',
+        args: ['test/lib/servers/request-http-stop.mjs', `http://127.0.0.1:${port}/__mcpz/shutdown`],
+      };
+    }
+    const serverRegistry = createServerRegistry(
+      {
+        'http-without-stop': {
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          start,
+        },
+      },
+      { cwd: projectRoot, dialects: ['start'] }
+    );
+    const server = serverRegistry.servers.get('http-without-stop');
+    assert.ok(server?.process.pid, 'owned HTTP process should have a process ID');
+    const childClose = waitForChildClose(server.process);
+    try {
+      await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+      const result = await serverRegistry.close('SIGINT', { timeoutMs: 1000 });
+      const closed = await childClose;
+      assert.strictEqual(result.timedOut, false, 'the supported HTTP shutdown path should close before timeout');
+      assert.strictEqual(result.killedCount, 0, 'healthy HTTP shutdown should not use emergency termination');
+      assert.strictEqual(closed.code, 0, 'the HTTP server should exit cleanly');
+    } finally {
+      await serverRegistry.close();
+    }
+  });
+
+  it('should report emergency termination for an unresponsive real process', async () => {
+    const serverRegistry = createServerRegistry({ unresponsive: { command: 'node', args: ['test/lib/servers/unresponsive-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = serverRegistry.servers.get('unresponsive');
+    assert.ok(server?.process.pid, 'unresponsive process should have a process ID');
+    const childClose = waitForChildClose(server.process);
+
+    const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+    const closed = await childClose;
+    assert.strictEqual(result.timedOut, true, 'unresponsive process should exceed its cooperative close timeout');
+    assert.strictEqual(result.killedCount, 1, 'emergency process-tree termination should be reported');
+    assert.ok(closed.code !== 0 || closed.signal !== null, 'the child should close after emergency termination');
+    await waitForProcessExit(server.process.pid, 2000);
+  });
+
+  it('should report launcher closure without claiming Windows descendant containment', async () => {
+    const pidFile = path.resolve('.tmp', `owned-descendant-${process.pid}-${Date.now()}.pid`);
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    const serverRegistry = createServerRegistry({ parent: { command: process.execPath, args: ['test/lib/servers/process-tree-parent.mjs', 'parent', pidFile] } }, { cwd: projectRoot });
+    const server = serverRegistry.servers.get('parent');
+    assert.ok(server?.process.pid, 'owned parent should have a process ID');
+    const parentClose = waitForChildClose(server.process);
+    let descendantPid: number | undefined;
+
+    try {
+      const closed = await parentClose;
+      assert.strictEqual(closed.code, 0, 'the fixture parent should exit normally');
+      assert.ok(fs.existsSync(pidFile), 'the descendant should report its PID before the launcher exits');
+      descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 0, 'the descendant should record a valid PID');
+      if (process.platform !== 'win32') assert.ok(isProcessAlive(descendantPid), 'the POSIX descendant should remain in its owned process group after its parent exits');
+
+      const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+      if (process.platform === 'win32') {
+        assert.strictEqual(result.timedOut, false, 'the launcher should already be closed');
+        // Do not use this observation to claim Windows descendant cleanup. No
+        // ownership handle tracks the descendant, and its lifetime is external.
+        assert.strictEqual(result.killedCount, 0, 'Windows descendant containment is not claimed without process ownership handles');
+      } else {
+        assert.strictEqual(result.timedOut, true, `the surviving POSIX group member should exceed cooperative shutdown: ${JSON.stringify(result)}`);
+        assert.strictEqual(result.killedCount, 1, 'POSIX process-group force termination must be visible');
+        await waitForProcessExit(descendantPid, 2000);
+      }
+    } finally {
+      await serverRegistry.close().catch(() => undefined);
+      if (descendantPid && isProcessAlive(descendantPid)) {
+        forceStopProcess(descendantPid);
+        await waitForProcessExit(descendantPid, 2000);
+      }
+      fs.rmSync(pidFile, { force: true });
+    }
+  });
+
+  it('should bound a hanging stop command and expose its Windows descendant limit', async () => {
+    const port = await getPort();
+    const pidFile = path.resolve('.tmp', `hanging-stop-${process.pid}-${Date.now()}.pid`);
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    const stopRegistry = createServerRegistry(
+      {
+        'http-server': {
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          start: {
+            command: 'node',
+            args: ['test/lib/servers/long-lived-http.mjs', '--port', String(port)],
+            stop: { command: 'node', args: ['test/lib/servers/hanging-stop-command.mjs', pidFile] },
+          },
+        },
+      },
+      { cwd: projectRoot, dialects: ['start'] }
+    );
+    const server = stopRegistry.servers.get('http-server');
+    assert.ok(server?.process.pid, 'owned HTTP server should have a process ID');
+    const serverClose = waitForChildClose(server.process);
+    let stopDescendantPid: number | undefined;
+
+    try {
+      await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+      await assert.rejects(stopRegistry.close('SIGINT', { timeoutMs: 100 }), (error: unknown) => error instanceof AggregateError && /stop command exceeded 100ms/i.test(nestedErrorMessages(error)));
+      const closed = await serverClose;
+      assert.ok(closed.signal !== null || closed.code !== 0, 'the server should be terminated after stop-command failure');
+      const pidStartedAt = Date.now();
+      while (!fs.existsSync(pidFile) && Date.now() - pidStartedAt < 2000) await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.ok(fs.existsSync(pidFile), 'the hanging stop command should have recorded its descendant');
+      stopDescendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      if (process.platform !== 'win32') {
+        await waitForProcessExit(stopDescendantPid, 2000);
+      }
+    } finally {
+      await stopRegistry.close().catch(() => undefined);
+      if (stopDescendantPid && isProcessAlive(stopDescendantPid)) {
+        forceStopProcess(stopDescendantPid);
+        await waitForProcessExit(stopDescendantPid, 2000);
+      }
+      fs.rmSync(pidFile, { force: true });
+    }
+  });
+
+  it('should report stop failures after attempting cleanup of every owned process', async () => {
+    const port = await getPort();
+    const failingRegistry = createServerRegistry(
+      {
+        'bad-stop': {
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          start: {
+            command: 'node',
+            args: ['test/lib/servers/long-lived-http.mjs', '--port', String(port)],
+            stop: { command: 'node', args: ['-e', 'process.exitCode = 7'] },
+          },
+        },
+        'good-stdio': { command: 'node', args: ['test/lib/servers/minimal-stdio.mjs'] },
+      },
+      { cwd: projectRoot, dialects: ['servers', 'start'] }
+    );
+    const badServer = failingRegistry.servers.get('bad-stop');
+    const goodServer = failingRegistry.servers.get('good-stdio');
+    assert.ok(badServer?.process.pid && goodServer?.process.pid, 'both owned processes should start');
+    const badClose = waitForChildClose(badServer.process);
+    const goodClose = waitForChildClose(goodServer.process);
+    await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+
+    await assert.rejects(failingRegistry.close('SIGINT', { timeoutMs: 150 }), (error: unknown) => {
+      if (!(error instanceof AggregateError)) return false;
+      const errors = (error as Error & { errors?: unknown[] }).errors;
+      return Array.isArray(errors) && errors.some((entry) => entry instanceof Error && entry.message.includes("server 'bad-stop'"));
+    });
+    await Promise.all([badClose, goodClose]);
+    await Promise.all([waitForProcessExit(badServer.process.pid, 2000), waitForProcessExit(goodServer.process.pid, 2000)]);
+    assert.strictEqual(goodServer.process.exitCode, 0, 'other owned processes should still receive normal cleanup');
+  });
+
+  it('should share concurrent and repeated registry close completion', async () => {
+    const closeRegistry = createServerRegistry({ 'close-once': { command: 'node', args: ['test/lib/servers/minimal-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = closeRegistry.servers.get('close-once');
+    assert.ok(server?.process, 'server should be spawned');
+    const childClose = waitForChildClose(server.process);
+
+    const firstClose = closeRegistry.close();
+    const concurrentClose = closeRegistry.close('SIGTERM', { timeoutMs: 100 });
+    assert.strictEqual(concurrentClose, firstClose, 'concurrent calls should share one shutdown promise');
+    const [firstResult, secondResult] = await Promise.all([firstClose, concurrentClose]);
+    assert.deepStrictEqual(secondResult, firstResult);
+    assert.deepStrictEqual(await closeRegistry.close(), firstResult, 'repeated close should return the settled result');
+    await childClose;
+  });
+
+  it('should settle a connection that races registry close', async () => {
+    const racingRegistry = createServerRegistry({ 'racing-server': { command: 'node', args: ['test/lib/servers/minimal-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = racingRegistry.servers.get('racing-server');
+    assert.ok(server?.process, 'server should be spawned');
+    const childClose = waitForChildClose(server.process);
+    const connecting = racingRegistry.connect('racing-server');
+    const closing = racingRegistry.close('SIGINT', { timeoutMs: 1000 });
+
+    await assert.rejects(connecting, /registry is closing/);
+    const result = await closing;
+    assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 });
+    await childClose;
+  });
+
+  it('should cancel a stalled real stdio handshake before owned-server cleanup', async () => {
+    const racingRegistry = createServerRegistry({ stalled: { command: 'node', args: ['test/lib/servers/stalled-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = racingRegistry.servers.get('stalled');
+    assert.ok(server?.process.pid, 'stalled server should have a process ID');
+    const childClose = waitForChildClose(server.process);
+    const connecting = racingRegistry.connect('stalled');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const startedAt = Date.now();
+    const closing = racingRegistry.close('SIGINT', { timeoutMs: 100 });
+
+    await assert.rejects(connecting, /cancel|clos|registry/i);
+    const closeResult = await closing;
+    assert.strictEqual(closeResult.timedOut, true, 'the unresponsive server should exceed the cooperative shutdown timeout');
+    assert.strictEqual(closeResult.killedCount, 1, 'the unresponsive owned server should be force-terminated');
+    await childClose;
+    await waitForProcessExit(server.process.pid, 2000);
+    assert.ok(Date.now() - startedAt < 7000, 'stalled connection and cleanup must remain bounded');
+  });
+
+  it('should bound a hanging client close and still close owned processes', async () => {
+    const clientRegistry = createServerRegistry({ server: { command: 'node', args: ['test/lib/servers/minimal-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = clientRegistry.servers.get('server');
+    assert.ok(server?.process.pid, 'server should have a process ID');
+    const childClose = waitForChildClose(server.process);
+    const client = await clientRegistry.connect('server');
+    const nativeClose = client.nativeClient.close.bind(client.nativeClient);
+    client.nativeClient.close = async () => new Promise<void>(() => {});
+
+    const closeStartedAt = Date.now();
+    await assert.rejects(clientRegistry.close('SIGINT', { timeoutMs: 100 }), (error: unknown) => error instanceof AggregateError && /did not close within 100ms/.test(error.message));
+    await childClose;
+    await waitForProcessExit(server.process.pid, 2000);
+    assert.ok(Date.now() - closeStartedAt < 3000, 'a stuck client close must not delay process cleanup');
+    client.nativeClient.close = nativeClose;
+  });
+
+  it('should share an in-flight lease release with registry close', async () => {
+    const leaseRegistry = createServerRegistry({ server: { command: 'node', args: ['test/lib/servers/minimal-stdio.mjs'] } }, { cwd: projectRoot });
+    const server = leaseRegistry.servers.get('server');
+    assert.ok(server?.process, 'server should be spawned');
+    const client = await leaseRegistry.connect('server');
+    const nativeClose = client.nativeClient.close.bind(client.nativeClient);
+    let finishClose: (() => void) | undefined;
+    client.nativeClient.close = async () => {
+      await new Promise<void>((resolve) => {
+        finishClose = resolve;
+      });
+      await nativeClose();
+    };
+
+    const releasing = client.close();
+    const closing = leaseRegistry.close('SIGINT', { timeoutMs: 1000 });
+    assert.ok(finishClose, 'the user lease close should own the pending transport close');
+    setTimeout(() => finishClose?.(), 100);
+    const [releaseResult, closeResult] = await Promise.all([releasing, closing]);
+    assert.strictEqual(releaseResult, undefined);
+    assert.deepStrictEqual(closeResult, { timedOut: false, killedCount: 0 });
   });
 
   it('should handle servers config format directly', async () => {
@@ -327,6 +660,52 @@ describe('createServerRegistry', () => {
 
     await registry.close();
     registry = undefined;
+  });
+
+  it('should preserve external ownership when spawning is disabled', async () => {
+    const port = await getPort();
+    const url = `http://127.0.0.1:${port}/mcp`;
+    const shutdownUrl = `http://127.0.0.1:${port}/__mcpz/shutdown`;
+    const config = {
+      'owned-http': {
+        type: 'http' as const,
+        url,
+        start: {
+          command: 'node',
+          args: ['test/lib/servers/echo-http.mjs', '--port', String(port)],
+          stop: {
+            command: 'node',
+            args: ['test/lib/servers/request-http-stop.mjs', shutdownUrl],
+          },
+        },
+      },
+    };
+    const owner = createServerRegistry(config, { cwd: projectRoot, dialects: ['start'] });
+    const ownedServer = owner.servers.get('owned-http');
+    assert.ok(ownedServer?.process.pid, 'the owner should spawn the HTTP process');
+    const ownerClient = await owner.connect('owned-http');
+    await ownerClient.close();
+
+    const external = createServerRegistry(config, { cwd: projectRoot, dialects: [] });
+    try {
+      assert.strictEqual(external.servers.size, 0, 'an empty dialect list must not start a second process');
+      await external.close();
+
+      assert.strictEqual(ownedServer.process.exitCode, null, 'closing an attaching registry must leave the owned server running');
+      assert.strictEqual(ownedServer.process.signalCode, null, 'closing an attaching registry must not signal the owned server');
+      const response = await fetch(url);
+      await response.arrayBuffer();
+      assert.strictEqual(response.status, 405, 'the external server should still serve requests');
+
+      assert.deepStrictEqual(await owner.close('SIGINT', { timeoutMs: 1000 }), { timedOut: false, killedCount: 0 });
+      assert.ok(ownedServer.process.exitCode !== null || ownedServer.process.signalCode !== null, 'the owner should stop its HTTP server');
+    } finally {
+      try {
+        await external.close();
+      } finally {
+        await owner.close('SIGINT', { timeoutMs: 1000 }).catch(() => undefined);
+      }
+    }
   });
 });
 

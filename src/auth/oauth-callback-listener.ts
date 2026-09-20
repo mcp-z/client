@@ -156,16 +156,42 @@ export class OAuthCallbackListener {
   /**
    * Wait for OAuth callback with timeout
    */
-  async waitForCallback(timeoutMs = 300000): Promise<CallbackResult> {
+  async waitForCallback(timeoutMs = 300000, signal?: AbortSignal): Promise<CallbackResult> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason instanceof Error ? signal.reason : new Error('OAuth authorization was cancelled'));
+        return;
+      }
       this.resolveCallback = resolve;
       this.rejectCallback = reject;
 
+      const onAbort = () => this.rejectCallback?.(signal?.reason instanceof Error ? signal.reason : new Error('OAuth authorization was cancelled'));
+      signal?.addEventListener('abort', onAbort, { once: true });
+
       // Set timeout to prevent hanging forever
       this.timeout = setTimeout(() => {
-        reject(new Error(`Authorization timeout - no callback received within ${timeoutMs / 1000} seconds`));
+        this.rejectCallback?.(new Error(`Authorization timeout - no callback received within ${timeoutMs / 1000} seconds`));
         this.stop();
       }, timeoutMs);
+
+      const cleanup = () => {
+        signal?.removeEventListener('abort', onAbort);
+        if (this.timeout) {
+          clearTimeout(this.timeout);
+          this.timeout = undefined;
+        }
+      };
+      // Promise settlement can originate from callback, abort, or timeout.
+      const originalResolve = this.resolveCallback;
+      const originalReject = this.rejectCallback;
+      this.resolveCallback = (result) => {
+        cleanup();
+        originalResolve?.(result);
+      };
+      this.rejectCallback = (error) => {
+        cleanup();
+        originalReject?.(error);
+      };
     });
   }
 

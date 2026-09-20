@@ -30,23 +30,78 @@ import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { ExistingProcessTransport } from './existing-process-transport.ts';
 import { waitForHttpReady } from './wait-for-http-ready.ts';
 
-/**
- * Wrap promise with timeout - throws if promise takes too long
- * Clears timeout when promise completes to prevent hanging event loop
- * @param promise - Promise to wrap
- * @param ms - Timeout in milliseconds
- * @param operation - Description of operation for error message
- * @returns Promise result or timeout error
- */
-async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
-  let timeoutId: NodeJS.Timeout;
+const HTTP_CONNECTION_TIMEOUT_MS = 30_000;
+const CLIENT_CLEANUP_TIMEOUT_MS = 5_000;
 
-  return Promise.race([
-    promise.finally(() => clearTimeout(timeoutId)),
-    new Promise<T>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${operation}`)), ms);
-    }),
-  ]);
+/** @internal - Bounds work by aborting the actual request signal at the deadline. */
+export async function withAbortTimeout<T>(operationFn: (signal: AbortSignal) => Promise<T>, ms: number, operation: string, parentSignal?: AbortSignal): Promise<T> {
+  const controller = new AbortController();
+  const timeoutError = new Error(`Timeout after ${ms}ms: ${operation}`);
+  const abortFromParent = (): void => controller.abort(parentSignal?.reason instanceof Error ? parentSignal.reason : new Error('Connection was cancelled'));
+  parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  if (parentSignal?.aborted) abortFromParent();
+  const timeoutId = setTimeout(() => controller.abort(timeoutError), ms);
+
+  try {
+    // Preserve the operation's error unchanged: connection cleanup may have
+    // attached failures to the original cancellation or timeout.
+    return await operationFn(controller.signal);
+  } finally {
+    clearTimeout(timeoutId);
+    parentSignal?.removeEventListener('abort', abortFromParent);
+  }
+}
+
+/** @internal - Connects a transport with a deadline that aborts and cleans up the actual connection. */
+export async function connectTransportWithTimeout(client: Client, transport: Transport, ms: number, operation: string, parentSignal?: AbortSignal): Promise<void> {
+  return withAbortTimeout((signal) => connectTransport(client, transport, signal), ms, operation, parentSignal);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Connection was cancelled');
+}
+
+async function closeClientWithinTimeout(client: Client): Promise<void> {
+  let timeoutId: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      client.close(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`Client cleanup did not complete within ${CLIENT_CLEANUP_TIMEOUT_MS}ms`)), CLIENT_CLEANUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function rethrowAfterClientCleanup(error: unknown, clients: Client[], message: string): Promise<never> {
+  const cleanup = await Promise.allSettled(clients.map((client) => closeClientWithinTimeout(client)));
+  const cleanupErrors = cleanup.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+  if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], message, { cause: error });
+  throw error;
+}
+
+/** @internal - Connects one client/transport pair and reports any failed cleanup. */
+export async function connectTransport(client: Client, transport: Transport, signal?: AbortSignal): Promise<void> {
+  let abortHandler: (() => void) | undefined;
+  try {
+    throwIfAborted(signal);
+    const connecting = client.connect(transport);
+    if (signal) {
+      const aborted = new Promise<never>((_, reject) => {
+        abortHandler = () => reject(signal.reason instanceof Error ? signal.reason : new Error('Connection was cancelled'));
+        signal.addEventListener('abort', abortHandler, { once: true });
+      });
+      await Promise.race([connecting, aborted]);
+    } else {
+      await connecting;
+    }
+  } catch (error) {
+    await rethrowAfterClientCleanup(error, [client], 'MCP connection failed and client cleanup also failed');
+  } finally {
+    if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+  }
 }
 
 /**
@@ -146,6 +201,8 @@ export async function connectMcpClient(
     dcrAuthenticator?: Partial<DcrAuthenticatorOptions>;
     logger?: Logger;
     versionNegotiation?: VersionNegotiationOptions;
+    /** Cancels readiness, authentication, and transport connection work. */
+    signal?: AbortSignal;
   }
 ): Promise<Client> {
   // Detect whether we have a RegistryLike instance or just config
@@ -153,6 +210,7 @@ export async function connectMcpClient(
   const serversConfig: ServersConfig = isRegistry ? (registryOrConfig as RegistryLike).config : (registryOrConfig as ServersConfig);
   const registry = isRegistry ? (registryOrConfig as RegistryLike) : undefined;
   const logger = options?.logger ?? defaultLogger;
+  throwIfAborted(options?.signal);
 
   const serverConfig = serversConfig[serverName];
 
@@ -183,7 +241,7 @@ export async function connectMcpClient(
     if (serverHandle) {
       // Reuse the already-spawned process
       const transport = new ExistingProcessTransport(serverHandle.process);
-      await client.connect(transport);
+      await connectTransport(client, transport, options?.signal);
     } else {
       // No registry or server not in registry - spawn new process directly
       // This is the standard fallback when process management is not used
@@ -198,7 +256,7 @@ export async function connectMcpClient(
       });
 
       // client.connect() performs initialize handshake - when it resolves, server is ready
-      await client.connect(transport);
+      await connectTransport(client, transport, options?.signal);
     }
   } else if (transportType === 'http') {
     if (!('url' in serverConfig) || !serverConfig.url) {
@@ -211,7 +269,7 @@ export async function connectMcpClient(
 
     if (isSpawnedHttp) {
       logger.debug(`[connectMcpClient] waiting for HTTP server '${serverName}' at ${serverConfig.url}`);
-      await waitForHttpReady(serverConfig.url);
+      await waitForHttpReady(serverConfig.url, 30000, options?.signal);
       logger.debug(`[connectMcpClient] HTTP server '${serverName}' ready`);
     }
 
@@ -225,7 +283,7 @@ export async function connectMcpClient(
     // base names a different resource, which authorization servers that validate
     // the `resource` indicator reject as `invalid_target`.
     const mcpServerUrl = normalizeUrl(serverConfig.url);
-    const capabilities = await withTimeout(probeAuthCapabilities(mcpServerUrl), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery');
+    const capabilities = await withAbortTimeout((signal) => probeAuthCapabilities(mcpServerUrl, { signal }), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery', options?.signal);
 
     let authToken: string | undefined;
 
@@ -245,7 +303,7 @@ export async function connectMcpClient(
       });
 
       // Ensure we have valid tokens (performs DCR + OAuth if needed)
-      const tokens = await authenticator.ensureAuthenticated(mcpServerUrl, capabilities);
+      const tokens = await authenticator.ensureAuthenticated(mcpServerUrl, capabilities, options?.signal);
       authToken = tokens.accessToken;
 
       logger.debug(`✅ Authentication complete for '${serverName}'`);
@@ -272,8 +330,11 @@ export async function connectMcpClient(
       const transport = new StreamableHTTPClientTransport(url, transportOptions);
       // Type assertion: SDK transport has sessionId: string | undefined but Transport expects string
       // This is safe at runtime - the undefined is valid per MCP spec
-      await withTimeout(client.connect(transport as unknown as Transport), 30000, 'StreamableHTTP connection');
+      await connectTransportWithTimeout(client, transport as unknown as Transport, HTTP_CONNECTION_TIMEOUT_MS, 'StreamableHTTP connection', options?.signal);
     } catch (error) {
+      // Cancellation and cleanup failures must reach the caller; neither can
+      // safely be converted into an SSE fallback attempt.
+      if (options?.signal?.aborted || error instanceof AggregateError) throw error;
       // Fall back to SSE transport (MCP protocol version 2024-11-05)
       // SSE is a standard MCP transport used by many servers (e.g., FastMCP ecosystem)
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -284,9 +345,8 @@ export async function connectMcpClient(
       const isConnectionRefused = cause?.code === 'ECONNREFUSED' || errorMessage.includes('Connection refused');
 
       if (isConnectionRefused) {
-        // Clean up client resources before throwing
-        await client.close().catch(() => {});
-        throw new Error(`Server not running at ${url}`);
+        const unavailable = new Error(`Server not running at ${url}`, { cause: error });
+        throw unavailable;
       }
 
       // Check for known errors that indicate SSE fallback is needed
@@ -321,15 +381,9 @@ export async function connectMcpClient(
 
       const sseTransport = new SSEClientTransport(url, sseTransportOptions);
 
-      try {
-        await withTimeout(sseClient.connect(sseTransport), 30000, 'SSE connection');
-        // Return SSE client instead of original
-        return sseClient;
-      } catch (sseError) {
-        // SSE connection failed - clean up both clients before throwing
-        await Promise.all([client.close().catch(() => {}), sseClient.close().catch(() => {})]);
-        throw sseError;
-      }
+      await connectTransportWithTimeout(sseClient, sseTransport, HTTP_CONNECTION_TIMEOUT_MS, 'SSE connection', options?.signal);
+      // Return SSE client instead of original
+      return sseClient;
     }
   }
 

@@ -5,20 +5,48 @@
  * Implements Claude Code-compatible configuration with start extension support.
  */
 
+import type { VersionNegotiationOptions } from '@modelcontextprotocol/client';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as process from 'process';
 import { decorateClient, type ManagedClient } from '../client-helpers.ts';
 import { validateServers } from '../config/validate-config.ts';
 import { connectMcpClient } from '../connection/connect-client.ts';
+import type { DcrAuthenticatorOptions } from '../dcr/dcr-authenticator.ts';
 import { buildCapabilityIndex, type CapabilityClient, searchCapabilities as executeCapabilitySearch, type SearchOptions, type SearchResponse } from '../search/index.ts';
-import type { McpServerEntry, TransportType } from '../types.ts';
-import { logger } from '../utils/logger.ts';
+import type { McpServerEntry, StartConfig, StopCommandConfig, TransportType } from '../types.ts';
+import { type Logger, logger } from '../utils/logger.ts';
 import { type ServerProcess, spawnProcess } from './spawn-server.ts';
 
 /**
  * Servers configuration type - a map of server names to their configurations.
  */
 export type ServersConfig = Record<string, McpServerEntry>;
+
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5000;
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function withCause(message: string, cause: unknown): Error {
+  return new Error(message, { cause });
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<{ settled: true; value: T } | { settled: true; error: unknown } | { settled: false }> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    promise.then(
+      (value) => ({ settled: true as const, value }),
+      (error: unknown) => ({ settled: true as const, error })
+    ),
+    new Promise<{ settled: false }>((resolve) => {
+      timer = setTimeout(() => resolve({ settled: false }), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
 
 /**
  * Dialect for server spawning.
@@ -27,6 +55,8 @@ export type ServersConfig = Record<string, McpServerEntry>;
  * - 'start': Spawn HTTP servers with start blocks
  */
 export type Dialect = 'servers' | 'start';
+
+type RegistryConnectOptions = Omit<NonNullable<Parameters<typeof connectMcpClient>[2]>, 'signal'>;
 
 /**
  * Options for creating a server registry.
@@ -56,9 +86,9 @@ export interface CreateServerRegistryOptions {
  * Result of closing the registry.
  */
 export interface CloseResult {
-  /** Whether any process timed out during shutdown */
+  /** Whether any owned process exceeded its cooperative shutdown timeout */
   timedOut: boolean;
-  /** Number of processes that were force-killed */
+  /** Number of owned processes that required emergency force termination */
   killedCount: number;
 }
 
@@ -88,6 +118,8 @@ interface SpawnConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  cwd?: string;
+  stop?: StopCommandConfig;
 }
 
 /**
@@ -101,6 +133,26 @@ function filterEnv(env: Record<string, string | undefined>): Record<string, stri
     }
   }
   return filtered;
+}
+
+function getStartSpawnConfig(start: StartConfig, transportType: TransportType, baseEnv: Record<string, string | undefined>): SpawnConfig {
+  const stop =
+    start.stop && (transportType === 'http' || transportType === 'sse-ide')
+      ? {
+          ...start.stop,
+          cwd: start.stop.cwd,
+          env: filterEnv({ ...baseEnv, ...start.env, ...start.stop.env }),
+        }
+      : undefined;
+
+  return {
+    shouldSpawn: true,
+    command: start.command,
+    args: start.args || [],
+    env: filterEnv({ ...baseEnv, ...start.env }),
+    cwd: start.cwd,
+    ...(stop && { stop }),
+  };
 }
 
 /**
@@ -119,6 +171,10 @@ function filterEnv(env: Record<string, string | undefined>): Record<string, stri
  */
 function getSpawnConfig(entry: McpServerEntry, dialects: Dialect[], baseEnv: Record<string, string | undefined>): SpawnConfig {
   const transportType = inferTransportType(entry);
+  if (dialects.length === 0) {
+    return { shouldSpawn: false };
+  }
+
   const hasServers = dialects.includes('servers');
   const hasStart = dialects.includes('start');
 
@@ -138,12 +194,7 @@ function getSpawnConfig(entry: McpServerEntry, dialects: Dialect[], baseEnv: Rec
   // If only 'start' dialect: Only spawn servers with start blocks
   if (hasStart && !hasServers) {
     if (entry.start) {
-      return {
-        shouldSpawn: true,
-        command: entry.start.command,
-        args: entry.start.args || [],
-        env: filterEnv({ ...baseEnv, ...entry.start.env }),
-      };
+      return getStartSpawnConfig(entry.start, transportType, baseEnv);
     }
     return { shouldSpawn: false };
   }
@@ -151,12 +202,7 @@ function getSpawnConfig(entry: McpServerEntry, dialects: Dialect[], baseEnv: Rec
   // Both dialects: Spawn both start blocks and stdio servers
   // Priority: start blocks first, then stdio
   if (entry.start) {
-    return {
-      shouldSpawn: true,
-      command: entry.start.command,
-      args: entry.start.args || [],
-      env: filterEnv({ ...baseEnv, ...entry.start.env }),
-    };
+    return getStartSpawnConfig(entry.start, transportType, baseEnv);
   }
 
   if (transportType === 'stdio' && entry.command) {
@@ -175,8 +221,6 @@ function getSpawnConfig(entry: McpServerEntry, dialects: Dialect[], baseEnv: Rec
  * A registry of spawned MCP servers with connection management.
  * Provides access to individual server handles, connection management, and collection-wide close.
  */
-type RegistryConnectOptions = Parameters<typeof connectMcpClient>[2];
-
 export interface ServerRegistry {
   /**
    * The resolved servers configuration that was used.
@@ -201,17 +245,23 @@ export interface ServerRegistry {
    * The connected client is automatically tracked for close.
    *
    * @param name - Server name from configuration
+   * @param options - Authentication, logging, and protocol negotiation options
    * @returns Connected MCP SDK Client
    */
-  connect: (name: string, options?: RegistryConnectOptions) => Promise<ManagedClient>;
+  connect: (name: string, options?: { dcrAuthenticator?: Partial<DcrAuthenticatorOptions>; logger?: Logger; versionNegotiation?: VersionNegotiationOptions }) => Promise<ManagedClient>;
 
   /**
    * Close all clients and servers gracefully.
-   * First closes all tracked clients, then sends the specified signal to all server processes.
+   * Stops new connections, waits for in-flight connections, closes tracked clients, and then
+   * stops only processes owned by this registry. Stdio children receive stdin EOF first
+   * and the requested signal on POSIX if they remain open; owned HTTP children may use
+   * their configured application-specific stop command. POSIX cleanup tracks the detached
+   * process group; Windows can terminate only the direct child and cannot verify descendants.
+   * Cleanup failures are reported after every owned resource has been attempted.
    *
    * @param signal - Signal to send to processes (default: SIGINT)
    * @param opts - Options including timeout
-   * @returns Promise resolving to whether any process timed out and how many were force-killed
+   * @returns Promise resolving to whether any process timed out and how many required emergency force termination
    */
   close: (signal?: NodeJS.Signals, opts?: { timeoutMs?: number }) => Promise<CloseResult>;
 
@@ -304,6 +354,21 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
   const servers = new Map<string, ServerProcess>();
   const clients = new Set<ManagedClient>();
   const sharedStdioClients = new Map<string, { client?: ManagedClient; connecting?: Promise<ManagedClient>; refs: number }>();
+  const pendingConnects = new Set<Promise<ManagedClient>>();
+  const closeAbortController = new AbortController();
+  const clientClosePromises = new WeakMap<ManagedClient, Promise<void>>();
+  const closeRaceErrors: Error[] = [];
+  let lifecycleState: 'open' | 'closing' | 'closed' = 'open';
+  let closePromise: Promise<CloseResult> | undefined;
+
+  const closeClientOnce = (client: ManagedClient): Promise<void> => {
+    let pending = clientClosePromises.get(client);
+    if (!pending) {
+      pending = Promise.resolve().then(() => client.close());
+      clientClosePromises.set(client, pending);
+    }
+    return pending;
+  };
 
   // Start each server in the configuration
   for (const [name, entry] of Object.entries(serversConfig)) {
@@ -330,8 +395,7 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
         throw new Error(`Server "${name}" missing command field`);
       }
 
-      // All servers use the same working directory (cwd from options)
-      const resolvedCwd = cwd;
+      const resolvedCwd = spawnConfig.cwd ? path.resolve(cwd, spawnConfig.cwd) : cwd;
 
       // Start the server
       logger.info(`[${name}] starting ${transportType} server (${spawnConfig.command} ${(spawnConfig.args || []).join(' ')})`);
@@ -346,6 +410,8 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
         ...(spawnConfig.args !== undefined && { args: spawnConfig.args }),
         cwd: resolvedCwd,
         ...(spawnConfig.env && Object.keys(spawnConfig.env).length > 0 && { env: spawnConfig.env }),
+        inheritEnv: options?.env === undefined,
+        ...(spawnConfig.stop && { stop: { ...spawnConfig.stop, cwd: spawnConfig.stop.cwd ? path.resolve(resolvedCwd, spawnConfig.stop.cwd) : resolvedCwd } }),
         stdio,
       });
 
@@ -357,8 +423,8 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
     }
   }
 
-  // Create connect function that tracks clients
-  const connect = async (name: string, options?: RegistryConnectOptions): Promise<ManagedClient> => {
+  // Connect internally, then track each returned lease for registry shutdown.
+  const connectInternal = async (name: string, options?: RegistryConnectOptions): Promise<ManagedClient> => {
     const serverEntry = serversConfig[name];
     if (!serverEntry) {
       const available = Object.keys(serversConfig).join(', ');
@@ -380,7 +446,7 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
           entry.connecting = (async () => {
             // Pass minimal RegistryLike object to connectMcpClient
             const registryLike = { config: serversConfig, servers };
-            const rawClient = await connectMcpClient(registryLike, name, options);
+            const rawClient = await connectMcpClient(registryLike, name, { ...options, signal: closeAbortController.signal });
             const decorated = decorateClient(rawClient, { serverName: name });
             entry.client = decorated;
             entry.connecting = undefined;
@@ -399,21 +465,25 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
       }
 
       entry.refs += 1;
-      let released = false;
+      let releasePromise: Promise<void> | undefined;
       let lease: ManagedClient;
 
       lease = new Proxy(entry.client, {
         get(target, prop) {
           if (prop === 'close') {
-            return async () => {
-              if (released) return;
-              released = true;
-              clients.delete(lease);
-              entry.refs = Math.max(0, entry.refs - 1);
-              if (entry.refs === 0) {
-                sharedStdioClients.delete(name);
-                await target.close();
-              }
+            return () => {
+              releasePromise ??= (async () => {
+                entry.refs = Math.max(0, entry.refs - 1);
+                try {
+                  if (entry.refs === 0) {
+                    sharedStdioClients.delete(name);
+                    await target.close();
+                  }
+                } finally {
+                  clients.delete(lease);
+                }
+              })();
+              return releasePromise;
             };
           }
 
@@ -431,40 +501,97 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
 
     // Pass minimal RegistryLike object to connectMcpClient
     const registryLike = { config: serversConfig, servers };
-    const rawClient = await connectMcpClient(registryLike, name, options);
+    const rawClient = await connectMcpClient(registryLike, name, { ...options, signal: closeAbortController.signal });
     const decorated = decorateClient(rawClient, { serverName: name });
     clients.add(decorated);
     return decorated;
   };
 
-  // Create close function that stops all clients and servers
-  const close = async (signal: NodeJS.Signals = 'SIGINT', opts: { timeoutMs?: number } = {}): Promise<CloseResult> => {
-    logger.info(`[registry] closing (${signal})`);
-
-    // First, close all tracked clients
-    const clientClosePromises = Array.from(clients).map(async (client) => {
-      try {
-        await client.close();
-      } catch {
-        // Ignore errors during client close
-      }
-    });
-    await Promise.all(clientClosePromises);
-    clients.clear();
-
-    // Then close all server processes
-    if (servers.size === 0) {
-      return { timedOut: false, killedCount: 0 };
+  const connect = (name: string, options?: RegistryConnectOptions): Promise<ManagedClient> => {
+    if (lifecycleState !== 'open') {
+      return Promise.reject(new Error(`Cannot connect to server '${name}': registry is ${lifecycleState}`));
     }
 
-    // Close all servers in parallel
-    const closeResults = await Promise.all(Array.from(servers.values()).map((server) => server.close(signal, opts)));
+    const pending = connectInternal(name, options).then(async (client) => {
+      if (lifecycleState === 'open') return client;
 
-    // Check if any timed out and count how many were force-killed
-    const timedOut = closeResults.some((result) => result.timedOut);
-    const killedCount = closeResults.filter((result) => result.killed).length;
+      const result = await settleWithin(closeClientOnce(client), DEFAULT_SHUTDOWN_TIMEOUT_MS);
+      if (!result.settled) closeRaceErrors.push(new Error(`Client for server '${name}' did not close within ${DEFAULT_SHUTDOWN_TIMEOUT_MS}ms after a connection raced registry shutdown`));
+      else if ('error' in result) closeRaceErrors.push(withCause(`Failed to close server '${name}' after a connection raced registry shutdown`, asError(result.error)));
+      throw new Error(`Connection to server '${name}' completed while the registry was closing`);
+    });
+
+    pendingConnects.add(pending);
+    void pending.then(
+      () => pendingConnects.delete(pending),
+      () => pendingConnects.delete(pending)
+    );
+    return pending;
+  };
+
+  const closeAll = async (signal: NodeJS.Signals, opts: { timeoutMs?: number }): Promise<CloseResult> => {
+    logger.info(`[registry] closing (${signal})`);
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+    const errors: Error[] = [];
+    closeAbortController.abort(new Error('Server registry is closing'));
+
+    const pendingResult = await settleWithin(Promise.allSettled(Array.from(pendingConnects)), timeoutMs);
+    if (!pendingResult.settled) {
+      errors.push(new Error(`In-flight server connections did not settle within ${timeoutMs}ms after cancellation`));
+    }
+    errors.push(...closeRaceErrors);
+
+    // Client close can hang independently; bound it so every owned server still gets cleanup.
+    const clientEntries = Array.from(clients);
+    const clientResults = await Promise.all(clientEntries.map(async (client) => ({ client, result: await settleWithin(closeClientOnce(client), timeoutMs) })));
+    for (const { client, result } of clientResults) {
+      if (!result.settled) {
+        errors.push(new Error(`Client${client.serverName ? ` for server '${client.serverName}'` : ''} did not close within ${timeoutMs}ms`));
+      } else if ('error' in result) {
+        errors.push(withCause(`Failed to close client${client.serverName ? ` for server '${client.serverName}'` : ''}: ${asError(result.error).message}`, asError(result.error)));
+      }
+    }
+    clients.clear();
+    sharedStdioClients.clear();
+
+    // Server teardown runs even when pending connects or client closes failed.
+    const serverEntries = Array.from(servers.entries());
+    const serverResults = await Promise.all(
+      serverEntries.map(async ([name, server]) => {
+        try {
+          return { name, result: await server.close(signal, opts) };
+        } catch (error) {
+          return { name, error: asError(error) };
+        }
+      })
+    );
+
+    let timedOut = false;
+    let killedCount = 0;
+    for (const result of serverResults) {
+      if ('error' in result && result.error !== undefined) {
+        errors.push(withCause(`Failed to close server '${result.name}': ${result.error.message}`, result.error));
+      } else if ('result' in result) {
+        timedOut ||= result.result.timedOut;
+        if (result.result.killed) killedCount += 1;
+      }
+    }
+
+    lifecycleState = 'closed';
+    if (errors.length > 0) {
+      const details = errors.map((error) => error.message).join('; ');
+      throw new AggregateError(errors, `Registry shutdown completed with ${errors.length} cleanup failure(s): ${details}`);
+    }
 
     return { timedOut, killedCount };
+  };
+
+  const close = (signal: NodeJS.Signals = 'SIGINT', opts: { timeoutMs?: number } = {}): Promise<CloseResult> => {
+    if (!closePromise) {
+      lifecycleState = 'closing';
+      closePromise = closeAll(signal, opts);
+    }
+    return closePromise;
   };
 
   const searchFromRegistry = async (query: string, options: SearchOptions = {}): Promise<SearchResponse> => {

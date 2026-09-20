@@ -87,4 +87,28 @@ export interface StartConfig {
    * Working directory
    */
   cwd?: string;
+  stop?: StopCommandConfig;
+}
+/**
+ * Optional application-specific cooperative shutdown command for a registry-owned HTTP server
+ */
+export interface StopCommandConfig {
+  /**
+   * Command that requests application-specific server shutdown
+   */
+  command: string;
+  /**
+   * Command arguments
+   */
+  args?: string[];
+  /**
+   * Environment variables for the stop command
+   */
+  env?: {
+    [k: string]: string;
+  };
+  /**
+   * Working directory for the stop command
+   */
+  cwd?: string;
 }

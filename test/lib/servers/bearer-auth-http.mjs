@@ -34,6 +34,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import express from 'express';
 import { parseArgs } from 'util';
 import { z } from 'zod';
+import { installHttpShutdown } from './http-shutdown.mjs';
 
 function parseConfig() {
   const { values } = parseArgs({
@@ -210,8 +211,10 @@ async function main() {
 
   // Create Express app with bearer token authentication
   const app = express();
+  let httpServer;
 
   app.use(express.json());
+  const shutdown = installHttpShutdown(app, server, () => httpServer, 'bearer-auth-http');
 
   // Apply bearer token validation middleware to /mcp endpoint
   const bearerAuthMiddleware = createBearerAuthMiddleware(config.validTokens);
@@ -253,7 +256,7 @@ async function main() {
     }
   });
 
-  const httpServer = app.listen(config.port, () => {
+  httpServer = app.listen(config.port, () => {
     console.error(`[bearer-auth-http] Ready on port ${config.port}`);
   });
 
@@ -265,12 +268,6 @@ async function main() {
     }
     process.exit(1);
   });
-
-  // Graceful shutdown
-  const shutdown = () => {
-    httpServer.close();
-    process.exit(0);
-  };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

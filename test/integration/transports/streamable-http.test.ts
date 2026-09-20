@@ -42,6 +42,10 @@ describe('http transport', () => {
         start: {
           command: 'node',
           args: ['test/lib/servers/echo-http.mjs', '--port', String(port)],
+          stop: {
+            command: 'node',
+            args: ['test/lib/servers/request-http-stop.mjs', `http://127.0.0.1:${port}/__mcpz/shutdown`],
+          },
         },
       },
     };
@@ -187,6 +191,19 @@ describe('http transport', () => {
       assert.ok(c, 'Each client should be created');
       await c.close();
     }
+  });
+
+  it('should leave the owned HTTP process running when a client lease closes', async () => {
+    if (!registry) throw new Error('Registry not initialized');
+    const leasedClient = await registry.connect('echo-http');
+    const process = registry.servers.get('echo-http')?.process;
+    assert.ok(process, 'owned HTTP process should be tracked');
+
+    await leasedClient.close();
+
+    const response = await fetch(`http://127.0.0.1:${port}/mcp`);
+    assert.strictEqual(response.status, 405, 'the owned HTTP server should still accept requests after client lease release');
+    assert.strictEqual(process.exitCode, null, 'client lease release must not terminate the owned server');
   });
 
   it('should have SSE fallback implemented for standard MCP transport support', async () => {

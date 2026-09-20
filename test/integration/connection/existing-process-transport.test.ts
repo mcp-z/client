@@ -10,8 +10,11 @@
 
 import '../../lib/env-loader.ts';
 import assert from 'assert';
+import { spawn } from 'child_process';
 import * as path from 'path';
+import * as process from 'process';
 import type { ManagedClient } from '../../../src/client-helpers.ts';
+import { ExistingProcessTransport } from '../../../src/connection/existing-process-transport.ts';
 import type { ServerRegistry, ServersConfig } from '../../../src/index.ts';
 import { createServerRegistry } from '../../../src/spawn/spawn-servers.ts';
 
@@ -191,5 +194,127 @@ describe('ExistingProcessTransport', () => {
     assert.ok(registry.servers.has('test-server-1'), 'Server should still be in registry');
 
     await c2.close();
+  });
+
+  it('should detach process listeners and settle queued writes without stopping the shared child', async () => {
+    const fixture = path.join(testCwd, 'test/lib/servers/non-reading-stdio.mjs');
+    const child = spawn(process.execPath, [fixture], {
+      stdio: 'pipe',
+      detached: process.platform !== 'win32',
+    });
+    const transport = new ExistingProcessTransport(child);
+    const baselineCloseListeners = child.listenerCount('close');
+    const baselineErrorListeners = child.listenerCount('error');
+    const baselineStdinErrorListeners = child.stdin?.listenerCount('error') ?? 0;
+    let closeCount = 0;
+    transport.onclose = () => {
+      closeCount += 1;
+    };
+
+    try {
+      await transport.start();
+      assert.strictEqual(child.listenerCount('close'), baselineCloseListeners + 1);
+      assert.strictEqual(child.listenerCount('error'), baselineErrorListeners + 1);
+
+      let settledCount = 0;
+      const sends = Array.from({ length: 12 }, (_, id) =>
+        transport
+          .send({
+            jsonrpc: '2.0',
+            id,
+            method: 'test/write',
+            params: { payload: 'x'.repeat(512_000) },
+          })
+          .then(
+            () => {
+              settledCount += 1;
+            },
+            (error: unknown) => {
+              settledCount += 1;
+              throw error;
+            }
+          )
+      );
+      const allSends = Promise.allSettled(sends);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.ok(settledCount < sends.length, 'at least one write should remain queued while the child does not read stdin');
+
+      await transport.close();
+      await transport.close();
+      const settled = await allSends;
+      assert.ok(
+        settled.some((result) => result.status === 'rejected'),
+        'closing the transport should reject pending writes'
+      );
+      assert.strictEqual(closeCount, 1, 'closing the transport should notify onclose once');
+      assert.strictEqual(child.listenerCount('close'), baselineCloseListeners, 'transport close should detach the child close listener');
+      assert.strictEqual(child.listenerCount('error'), baselineErrorListeners, 'transport close should detach the child error listener');
+      assert.strictEqual(child.exitCode, null, 'closing a lease transport must leave its shared child running');
+
+      const stdin = child.stdin;
+      assert.ok(stdin, 'child stdin should remain available');
+      const drainStartedAt = Date.now();
+      while ((stdin.writableLength > 0 || stdin.listenerCount('error') !== baselineStdinErrorListeners) && Date.now() - drainStartedAt < 3000) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.strictEqual(stdin.writableLength, 0, 'the child should consume queued writes after the transport releases them');
+      assert.strictEqual(stdin.listenerCount('error'), baselineStdinErrorListeners, 'the pending-write error listener should detach after writes settle');
+    } finally {
+      await transport.close();
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid, 'SIGKILL');
+      }
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once('close', () => resolve()));
+      }
+    }
+  });
+
+  it('should keep handling stdin EPIPE until the shared child stream closes', async () => {
+    const fixture = path.join(testCwd, 'test/lib/servers/non-reading-stdio.mjs');
+    const child = spawn(process.execPath, [fixture], {
+      stdio: 'pipe',
+      detached: process.platform !== 'win32',
+    });
+    const transport = new ExistingProcessTransport(child);
+    const childClosed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    const baselineStdinErrorListeners = child.stdin?.listenerCount('error') ?? 0;
+    let allSends: Promise<PromiseSettledResult<void>[]> | undefined;
+
+    try {
+      await transport.start();
+      const sends = Array.from({ length: 12 }, (_, id) =>
+        transport.send({
+          jsonrpc: '2.0',
+          id,
+          method: 'test/write',
+          params: { payload: 'x'.repeat(512_000) },
+        })
+      );
+      allSends = Promise.allSettled(sends);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.ok((child.stdin?.writableLength ?? 0) > 0, 'large writes should still be queued on the non-reading child');
+
+      await transport.close();
+      if (process.platform === 'win32') child.kill('SIGKILL');
+      else if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      await childClosed;
+
+      const results = await allSends;
+      assert.ok(
+        results.some((result) => result.status === 'rejected'),
+        'queued sends should settle as rejected when the child exits'
+      );
+      assert.strictEqual(child.stdin?.listenerCount('error'), baselineStdinErrorListeners, 'the stdin error listener should detach after stream close');
+    } finally {
+      await transport.close();
+      if (child.exitCode === null && child.signalCode === null) {
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else if (child.pid) process.kill(-child.pid, 'SIGKILL');
+        await childClosed;
+      }
+      await allSends;
+    }
   });
 });

@@ -6,13 +6,17 @@
  */
 
 import '../../lib/env-loader.ts';
+import http from 'node:http';
+import { Client, SSEClientTransport, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
 import assert from 'assert';
+import getPort from 'get-port';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { ManagedClient } from '../../../src/client-helpers.ts';
-import { connectMcpClient } from '../../../src/connection/connect-client.ts';
+import { connectMcpClient, connectTransportWithTimeout } from '../../../src/connection/connect-client.ts';
 import type { ServerRegistry, ServersConfig } from '../../../src/index.ts';
 import { createServerRegistry } from '../../../src/spawn/spawn-servers.ts';
+import { withDeadline } from '../../lib/with-deadline.ts';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -208,4 +212,125 @@ describe('registry.connect', () => {
     assert.strictEqual(textContent.type, 'text');
     assert.ok(textContent.text.includes('test-message'), 'Should echo message');
   });
+
+  it('should cancel the live OAuth discovery request when connection setup is aborted', async () => {
+    let requestSeen!: () => void;
+    let socketClosed!: () => void;
+    const seen = new Promise<void>((resolve) => (requestSeen = resolve));
+    const closed = new Promise<void>((resolve) => (socketClosed = resolve));
+    const server = http.createServer((request) => {
+      requestSeen();
+      request.socket.once('close', socketClosed);
+    });
+    const port = await getPort();
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const controller = new AbortController();
+    const reason = new Error('connection setup cancelled');
+
+    try {
+      const pending = connectMcpClient({ stalled: { type: 'http', url: `http://127.0.0.1:${port}/mcp` } }, 'stalled', { signal: controller.signal });
+      await withDeadline(seen, 1000);
+      controller.abort(reason);
+      await assert.rejects(withDeadline(pending, 1000), (error: unknown) => error === reason);
+      await withDeadline(closed, 1000);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('preserves transport cleanup errors through connectMcpClient cancellation without SSE fallback', async () => {
+    let initializeSeen!: () => void;
+    let socketClosed!: () => void;
+    const initializeRequest = new Promise<void>((resolve) => (initializeSeen = resolve));
+    const connectionClosed = new Promise<void>((resolve) => (socketClosed = resolve));
+    let sseRequests = 0;
+    const server = http.createServer((request, response) => {
+      if (request.method === 'GET' && request.url === '/mcp' && request.headers.accept?.includes('text/event-stream')) {
+        sseRequests += 1;
+      }
+      if (request.url?.startsWith('/.well-known/')) {
+        response.writeHead(404).end();
+        return;
+      }
+      if (request.method === 'POST' && request.url === '/mcp') {
+        let body = '';
+        request.setEncoding('utf8');
+        request.on('data', (chunk: string) => (body += chunk));
+        request.on('end', () => {
+          if (body.includes('"method":"initialize"')) {
+            initializeSeen();
+            request.socket.once('close', socketClosed);
+            return;
+          }
+          response.writeHead(404).end();
+        });
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    const port = await getPort();
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const controller = new AbortController();
+    const abortError = new Error('connection setup cancelled');
+    const cleanupError = new Error('streamable transport cleanup failed');
+    const transportPrototype = StreamableHTTPClientTransport.prototype;
+    const originalClose = transportPrototype.close;
+    transportPrototype.close = async function () {
+      await originalClose.call(this);
+      throw cleanupError;
+    };
+
+    try {
+      const pending = connectMcpClient({ stalled: { type: 'http', url: `http://127.0.0.1:${port}/mcp` } }, 'stalled', { signal: controller.signal });
+      await withDeadline(initializeRequest, 1500);
+      controller.abort(abortError);
+      await assert.rejects(withDeadline(pending, 1500), (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.strictEqual(error.cause, abortError);
+        assert.deepStrictEqual(error.errors, [abortError, cleanupError]);
+        return true;
+      });
+      await withDeadline(connectionClosed, 1000);
+      assert.strictEqual(sseRequests, 0, 'cancellation with cleanup failure must not start SSE fallback');
+    } finally {
+      transportPrototype.close = originalClose;
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  for (const [transportName, createTransport] of [
+    ['Streamable HTTP', (url: URL) => new StreamableHTTPClientTransport(url) as unknown as Transport],
+    ['SSE', (url: URL) => new SSEClientTransport(url)],
+  ] as const) {
+    it(`aborts the ${transportName} connection at its deadline and waits for socket cleanup`, async () => {
+      let requestSeen!: () => void;
+      let socketClosed!: () => void;
+      const seen = new Promise<void>((resolve) => (requestSeen = resolve));
+      const closed = new Promise<void>((resolve) => (socketClosed = resolve));
+      const server = http.createServer((request) => {
+        request.socket.once('close', socketClosed);
+        requestSeen();
+      });
+      const port = await getPort();
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+      const url = new URL(`http://127.0.0.1:${port}/mcp`);
+      const client = new Client({ name: 'connection-deadline-test', version: '1.0.0' }, { capabilities: {} });
+
+      try {
+        const pending = connectTransportWithTimeout(client, createTransport(url), 250, `${transportName} connection`);
+        await withDeadline(seen, 1500);
+        await assert.rejects(withDeadline(pending, 1500), (error: unknown) => {
+          assert.ok(!(error instanceof AggregateError), 'a cooperative transport close should complete without cleanup errors');
+          assert.match(String(error), new RegExp(`Timeout after 250ms: ${transportName} connection`));
+          return true;
+        });
+        await withDeadline(closed, 1000);
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+  }
 });

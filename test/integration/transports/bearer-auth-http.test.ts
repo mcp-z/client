@@ -46,6 +46,10 @@ describe('bearer auth http transport', () => {
         start: {
           command: 'node',
           args: ['test/lib/servers/bearer-auth-http.mjs', '--port', String(port), '--token', validToken],
+          stop: {
+            command: 'node',
+            args: ['test/lib/servers/request-http-stop.mjs', `http://127.0.0.1:${port}/__mcpz/shutdown`],
+          },
         },
       },
     };
@@ -251,6 +255,10 @@ describe('bearer auth http transport', () => {
         start: {
           command: 'node',
           args: ['test/lib/servers/bearer-auth-http.mjs', '--port', String(port2), '--token', validToken],
+          stop: {
+            command: 'node',
+            args: ['test/lib/servers/request-http-stop.mjs', `http://127.0.0.1:${port2}/__mcpz/shutdown`],
+          },
         },
       },
     };

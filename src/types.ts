@@ -5,7 +5,7 @@
  */
 
 // Re-export all generated types
-export type { MCPServers, McpServerEntry, StartConfig } from '../schemas/servers.d.ts';
+export type { MCPServers, McpServerEntry, StartConfig, StopCommandConfig } from '../schemas/servers.d.ts';
 
 /**
  * Transport type for server configuration

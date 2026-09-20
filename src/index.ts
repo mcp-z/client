@@ -8,7 +8,7 @@ export type { VersionNegotiationOptions } from '@modelcontextprotocol/client';
 // depending on the SDK themselves.
 export { SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
 // Config types (from schema)
-export type { McpServerEntry, StartConfig } from '../schemas/servers.d.ts';
+export type { McpServerEntry, StartConfig, StopCommandConfig } from '../schemas/servers.d.ts';
 // Auth - OAuth utilities
 export { probeAuthCapabilities } from './auth/capability-discovery.ts';
 export { DiscoveryFetchError, isLoopbackUrl } from './auth/discovery-fetch.ts';

@@ -53,6 +53,7 @@ export class InteractiveOAuthFlow {
   async performAuthFlow(authorizationEndpoint: string, tokenEndpoint: string, clientId: string, clientSecret: string, options: OAuthFlowOptions): Promise<TokenSet> {
     const logger = options.logger ?? defaultLogger;
     const callbackListener = new OAuthCallbackListener({ port: options.port, logger });
+    throwIfAborted(options.signal);
 
     // Generate PKCE parameters if requested (RFC 7636)
     let pkce: PkceParams | undefined;
@@ -97,15 +98,16 @@ export class InteractiveOAuthFlow {
         // Try to open browser (requires 'open' package or native command)
         await this.openBrowser(authUrl.toString());
       }
+      throwIfAborted(options.signal);
 
       // Wait for callback with timeout
       const timeout = options.timeout || (options.headless ? 60000 : 300000);
-      const result = await callbackListener.waitForCallback(timeout);
+      const result = await callbackListener.waitForCallback(timeout, options.signal);
 
       this.assertResponseIssuer(result.iss, options, logger);
 
       // Exchange authorization code for tokens (with PKCE verifier if used)
-      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, options.resource, options.allowLoopback ?? false, pkce?.codeVerifier);
+      const tokens = await this.exchangeCodeForTokens(tokenEndpoint, result.code, clientId, clientSecret, redirectUri, options.resource, options.allowLoopback ?? false, pkce?.codeVerifier, options.signal);
 
       return tokens;
     } catch (error) {
@@ -142,7 +144,7 @@ export class InteractiveOAuthFlow {
    * @param allowLoopback - Loopback trust grant computed by the caller from the server it is actually talking to, never from `tokenEndpoint`.
    * @param codeVerifier - Optional PKCE code verifier (RFC 7636).
    */
-  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, resource: string, allowLoopback: boolean, codeVerifier?: string): Promise<TokenSet> {
+  private async exchangeCodeForTokens(tokenEndpoint: string, code: string, clientId: string, clientSecret: string, redirectUri: string, resource: string, allowLoopback: boolean, codeVerifier?: string, signal?: AbortSignal): Promise<TokenSet> {
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -169,6 +171,7 @@ export class InteractiveOAuthFlow {
           Connection: 'close',
         },
         body: params,
+        signal,
       },
       'token endpoint',
       { allowLoopback }
@@ -211,7 +214,7 @@ export class InteractiveOAuthFlow {
    * @returns New token set with a refreshed access token.
    * @throws Error if refresh fails.
    */
-  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string, resource: string, allowLoopback = false): Promise<TokenSet> {
+  async refreshTokens(tokenEndpoint: string, refreshToken: string, clientId: string, clientSecret: string, resource: string, allowLoopback = false, signal?: AbortSignal): Promise<TokenSet> {
     // See exchangeCodeForTokens - tokenEndpoint is remote-controlled discovery data.
     const response = await discoveryFetch(
       tokenEndpoint,
@@ -229,6 +232,7 @@ export class InteractiveOAuthFlow {
           client_secret: clientSecret,
           resource,
         }),
+        signal,
       },
       'token endpoint',
       { allowLoopback }
@@ -290,4 +294,8 @@ export class InteractiveOAuthFlow {
 
     child.unref();
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('OAuth authorization was cancelled');
 }

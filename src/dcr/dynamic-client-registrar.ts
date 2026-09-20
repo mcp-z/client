@@ -58,6 +58,7 @@ export class DynamicClientRegistrar {
           Connection: 'close',
         },
         body: JSON.stringify(requestBody),
+        signal: options.signal,
       },
       'registration endpoint',
       { allowLoopback: options.allowLoopback ?? false }
