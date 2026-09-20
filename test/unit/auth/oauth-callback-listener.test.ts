@@ -26,7 +26,7 @@ describe('unit/auth/oauth-callback-listener', () => {
     // Block the port
     const blockingServer = http.createServer();
     await new Promise<void>((resolve) => {
-      blockingServer.listen(port, () => resolve());
+      blockingServer.listen(port, 'localhost', () => resolve());
     });
 
     try {
@@ -77,11 +77,15 @@ describe('unit/auth/oauth-callback-listener', () => {
     callbackPromise.catch(() => {});
 
     // Send callback request with error
-    const response = await fetch(`http://localhost:${port}/callback?error=access_denied&error_description=User%20denied`);
+    const response = await fetch(`http://localhost:${port}/callback?error=access_denied&error_description=%3Cscript%3Ealert(1)%3C%2Fscript%3E`);
     assert.strictEqual(response.status, 400);
+    const body = await response.text();
+    assert.ok(body.includes('The authorization provider returned an error.'));
+    assert.ok(!body.includes('<script>alert(1)</script>'));
 
     await assert.rejects(callbackPromise, (error: Error) => {
       assert.ok(error.message.includes('access_denied'));
+      assert.ok(error.message.includes('<script>alert(1)</script>'));
       return true;
     });
 

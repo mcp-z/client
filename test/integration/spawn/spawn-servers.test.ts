@@ -7,7 +7,9 @@ import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as process from 'process';
 import { fileURLToPath } from 'url';
+import { waitForOutput } from '../../lib/wait-for-output.ts';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +17,32 @@ const __dirname = path.dirname(__filename);
 
 // Project root directory (avoid process.cwd() - brittle!)
 const projectRoot = path.resolve(__dirname, '../../..');
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  while (isProcessAlive(pid)) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error(`Process ${pid} is still running`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+function forceStopProcess(pid: number): void {
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+}
 
 describe('createServerRegistry', () => {
   let registry: ServerRegistry | undefined;
@@ -146,6 +174,43 @@ describe('createServerRegistry', () => {
 
     assert.ok(server.process.killed || server.process.exitCode !== null, 'Process should be stopped after close');
     registry = undefined;
+  });
+
+  it('should stop a real Windows shell-launched server process', async () => {
+    const serverRegistry = createServerRegistry(
+      {
+        'long-lived-http': {
+          command: 'node',
+          args: ['test/lib/servers/long-lived-http.mjs'],
+        },
+      },
+      { cwd: projectRoot }
+    );
+    const server = serverRegistry.servers.get('long-lived-http');
+    assert.ok(server?.process.stdout, 'Server stdout should be piped');
+
+    let output = '';
+    server.process.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+
+    let serverPid: number | undefined;
+    try {
+      await waitForOutput(() => output, /^READY:(\d+)$/m, 5000);
+      const match = output.match(/^READY:(\d+)$/m);
+      assert.ok(match, 'Server should report its process ID');
+      serverPid = Number(match[1]);
+
+      const result = await serverRegistry.close();
+      assert.strictEqual(result.timedOut, false, 'Server process tree should close before timeout');
+      await waitForProcessExit(serverPid, 2000);
+    } finally {
+      await serverRegistry.close();
+      if (serverPid !== undefined && isProcessAlive(serverPid)) {
+        forceStopProcess(serverPid);
+        await waitForProcessExit(serverPid, 2000);
+      }
+    }
   });
 
   it('should handle servers config format directly', async () => {

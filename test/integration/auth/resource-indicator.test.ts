@@ -15,6 +15,7 @@
 
 import '../../lib/env-loader.ts';
 import assert from 'assert';
+import getPort from 'get-port';
 import http from 'http';
 import Keyv from 'keyv';
 import { probeAuthCapabilities } from '../../../src/auth/capability-discovery.ts';
@@ -110,7 +111,7 @@ async function startAuthServer(opts: { publishPrm: boolean }): Promise<{ base: s
  */
 async function authenticate(base: string, mcpServerUrl: string) {
   const capabilities = await probeAuthCapabilities(mcpServerUrl);
-  const port = 30000 + Math.floor(Math.random() * 20000);
+  const port = await getPort();
   const authenticator = new DcrAuthenticator({
     tokenStore: new Keyv(),
     headless: true,

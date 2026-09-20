@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.4] - 2026-09-20
+
+### Fixed
+
+- **Windows server shutdown now stops the complete process tree.** Shell-launched servers could leave their Node process running after the shell exited, keeping inherited stdio open and causing test runners to hang.
+
 ## [2.2.1] - 2026-09-08
 
 ### Fixed

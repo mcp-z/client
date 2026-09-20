@@ -25,8 +25,11 @@ import * as path from 'path';
  */
 export function resolvePath(filePath: string, cwd: string): string {
   // Expand ~ to home directory
-  if (filePath === '~' || filePath.startsWith('~/')) {
-    filePath = filePath.replace(/^~/, os.homedir());
+  if (filePath === '~') {
+    return os.homedir();
+  }
+  if (filePath.startsWith('~/')) {
+    filePath = path.join(os.homedir(), filePath.slice(2));
   }
 
   // If absolute, return as-is
@@ -70,8 +73,8 @@ export function resolveArgsPaths(args: string[], cwd: string): string[] {
     const flagMatch = arg.match(/^(--.+?)=(.+)$/);
     if (flagMatch) {
       const [, flag, value] = flagMatch;
-      // Only resolve if the value looks like a path (contains ./ or ../ or / )
-      if (value && value.includes('/')) {
+      // Only resolve if the value looks like a path (contains a path separator).
+      if (value && (value.includes('/') || value.includes('\\'))) {
         // Skip URLs in flag values
         if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
           return arg;

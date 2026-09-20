@@ -150,7 +150,7 @@ async function main() {
     }
   });
 
-  const httpServer = app.listen(config.port, () => {
+  const httpServer = app.listen(config.port, '127.0.0.1', () => {
     console.error(`[echo-http] Ready on port ${config.port}`);
   });
 

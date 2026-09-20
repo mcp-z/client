@@ -31,7 +31,7 @@ describe('resolveArgsPaths', () => {
   describe('npm package names', () => {
     it('should not resolve npm package names as file paths', () => {
       const args = ['@mcp-z/server', 'express', '@mcp-z/mcp-sheets', '--port', '3004', './local-file.js', '--env-file=./config.env'];
-      const testDir = '/test/dir';
+      const testDir = path.resolve('test/dir');
 
       const result = resolveArgsPaths(args, testDir);
 
@@ -45,15 +45,15 @@ describe('resolveArgsPaths', () => {
       assert.strictEqual(result[4], '3004', 'Flag values should remain unchanged');
 
       // But local files should still be resolved
-      assert.ok(result[5]?.includes(testDir), 'Local files should be resolved');
-      assert.ok(result[6]?.includes(testDir), 'Flag file paths should be resolved');
+      assert.strictEqual(result[5], path.resolve(testDir, './local-file.js'));
+      assert.strictEqual(result[6], `--env-file=${path.resolve(testDir, './config.env')}`);
     });
   });
 
   describe('URL handling', () => {
     it('should not resolve URLs as file paths', () => {
       const args = ['http://localhost:3001/mcp', 'https://api.example.com/webhook', '@mcp-z/server', './local-file.js'];
-      const testDir = '/test/dir';
+      const testDir = path.resolve('test/dir');
 
       const result = resolveArgsPaths(args, testDir);
 
@@ -65,7 +65,7 @@ describe('resolveArgsPaths', () => {
       assert.strictEqual(result[2], '@mcp-z/server', 'npm packages should remain unchanged');
 
       // Local files should still be resolved
-      assert.ok(result[3]?.includes(testDir), 'Local files should still be resolved');
+      assert.strictEqual(result[3], path.resolve(testDir, './local-file.js'));
     });
 
     it('should NOT resolve HTTP URLs in flag values as file paths', () => {
@@ -88,12 +88,12 @@ describe('resolveArgsPaths', () => {
 
     it('should NOT resolve WebSocket URLs in flag values as file paths', () => {
       const args = ['bin/server.js', '--port', '3000', '--url=ws://0.0.0.0:3000/mcp'];
-      const cwd = '/Users/kevin/Dev/Projects/ai/mcp-z/servers/mcp-drive';
+      const cwd = path.resolve('mcp-drive');
 
       const result = resolveArgsPaths(args, cwd);
 
       // First arg should be resolved as a path
-      assert.strictEqual(result[0], '/Users/kevin/Dev/Projects/ai/mcp-z/servers/mcp-drive/bin/server.js');
+      assert.strictEqual(result[0], path.resolve(cwd, 'bin/server.js'));
 
       // Port flag should be unchanged
       assert.strictEqual(result[1], '--port');
@@ -106,13 +106,13 @@ describe('resolveArgsPaths', () => {
 
   describe('file path resolution', () => {
     it('should still resolve actual file paths in flag values', () => {
-      const args = ['--env-file=./config/.env', '--config=/absolute/path/config.json'];
-      const cwd = '/home/user/project';
+      const args = [`--env-file=${path.join('config', '.env')}`, '--config=/absolute/path/config.json'];
+      const cwd = path.resolve('home/user/project');
 
       const result = resolveArgsPaths(args, cwd);
 
       // Relative path should be resolved
-      assert.strictEqual(result[0], '--env-file=/home/user/project/config/.env');
+      assert.strictEqual(result[0], `--env-file=${path.resolve(cwd, 'config', '.env')}`);
 
       // Absolute path should remain unchanged
       assert.strictEqual(result[1], '--config=/absolute/path/config.json');

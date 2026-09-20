@@ -55,8 +55,8 @@ export interface ServerProcess {
   process: ChildProcess;
 
   /**
-   * Close the server gracefully.
-   * Sends the specified signal (default: SIGINT), then SIGKILL after timeout.
+   * Close the server gracefully, terminating its process tree on Windows.
+   * Sends the specified signal (default: SIGINT), then force-kills after timeout.
    *
    * @param signal - Signal to send (default: SIGINT)
    * @param opts - Options including timeout
@@ -77,6 +77,23 @@ function normalizeEnv(env?: Record<string, string>): Record<string, string> {
     }
   }
   return result;
+}
+
+function terminateWindowsProcessTree(pid: number, force: boolean): Promise<void> {
+  const args = ['/PID', String(pid), '/T'];
+  if (force) args.push('/F');
+
+  return new Promise((resolve, reject) => {
+    const taskkill = spawn('taskkill.exe', args, { stdio: 'ignore', windowsHide: true });
+    taskkill.once('error', reject);
+    taskkill.once('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`taskkill.exe failed to stop process tree rooted at PID ${pid} (exit code ${code ?? 'unknown'})`));
+    });
+  });
 }
 
 /**
@@ -150,33 +167,47 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
 
     // Wait for 'close' event (process exit + stdio streams closed)
     // This is better than 'exit' because it ensures stdio is fully cleaned up
-    const closePromise = new Promise<{ timedOut: boolean; killed: boolean }>((resolve) => {
+    const closePromise = new Promise<{ timedOut: boolean; killed: boolean }>((resolve, reject) => {
       let isResolved = false;
       let wasKilled = false;
+      let timedOut = false;
 
-      const resolveOnce = (timedOut: boolean) => {
+      const resolveOnce = (didTimeout: boolean) => {
         if (isResolved) return;
         isResolved = true;
         clearTimeout(timeout);
-        resolve({ timedOut, killed: wasKilled });
+        resolve({ timedOut: didTimeout, killed: wasKilled });
+      };
+
+      const rejectOnce = (error: Error) => {
+        if (isResolved) return;
+        isResolved = true;
+        clearTimeout(timeout);
+        reject(error);
       };
 
       // Set timeout for forceful kill
       const timeout = setTimeout(() => {
-        try {
-          // Check again before SIGKILL
-          if (child.exitCode === null && !child.killed) {
-            child.kill('SIGKILL');
-            wasKilled = true;
+        timedOut = true;
+        const forceKill = async () => {
+          try {
+            if (process.platform === 'win32' && child.pid) {
+              await terminateWindowsProcessTree(child.pid, true);
+              wasKilled = true;
+            } else if (child.exitCode === null && !child.killed) {
+              wasKilled = child.kill('SIGKILL');
+            }
+            resolveOnce(true);
+          } catch (error) {
+            rejectOnce(error instanceof Error ? error : new Error(String(error)));
           }
-        } catch (_) {}
-        // Even if kill fails, resolve
-        resolveOnce(true);
+        };
+        void forceKill();
       }, timeoutMs);
 
       // Listen for 'close' event (not 'exit') to wait for stdio close
       child.once('close', () => {
-        resolveOnce(false);
+        if (!timedOut) resolveOnce(false);
       });
 
       // Also listen for 'error' event in case spawn failed
@@ -185,23 +216,23 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
         resolveOnce(false);
       });
 
-      // Send graceful shutdown signal
-      try {
-        // Check one more time before killing
-        if (child.exitCode !== null) {
-          resolveOnce(false);
-          return;
-        }
+      const requestShutdown = async () => {
+        try {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            resolveOnce(false);
+            return;
+          }
 
-        const killed = child.kill(signal);
-        // If kill returned false, process already exited
-        if (!killed) {
-          resolveOnce(false);
+          if (process.platform === 'win32' && child.pid) {
+            await terminateWindowsProcessTree(child.pid, false);
+          } else if (!child.kill(signal)) {
+            resolveOnce(false);
+          }
+        } catch (error) {
+          rejectOnce(error instanceof Error ? error : new Error(String(error)));
         }
-      } catch (_err) {
-        // If kill throws, process is gone or unreachable
-        resolveOnce(false);
-      }
+      };
+      void requestShutdown();
     });
 
     return closePromise;

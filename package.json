@@ -54,6 +54,8 @@
     "prepublish:check": "ncp",
     "prepublishOnly": "node scripts/require-dist-tag.cjs && tsds validate",
     "test": "tsds test:node --no-timeouts",
+    "test:ci": "tsds test:node --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
+    "test:ci:engines": "nvu engines tsds test:node --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
     "test:engines": "nvu engines tsds test:node --no-timeouts",
     "version": "tsds version"
   },

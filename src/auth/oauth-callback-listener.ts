@@ -55,7 +55,7 @@ export class OAuthCallbackListener {
         reject(error);
       });
 
-      this.server.listen(port, () => {
+      this.server.listen(port, 'localhost', () => {
         resolve();
       });
     });
@@ -94,7 +94,7 @@ export class OAuthCallbackListener {
         <html>
           <body>
             <h1>Authorization Failed</h1>
-            <p>${errorMessage}</p>
+            <p>The authorization provider returned an error.</p>
             <script>setTimeout(() => window.close(), 3000);</script>
           </body>
         </html>

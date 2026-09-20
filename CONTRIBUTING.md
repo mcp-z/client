@@ -68,3 +68,13 @@ See `README.md` for package overview and usage.
 ### Key design note: client helpers via decoration
 
 `registry.connect()` returns the MCP SDK `Client` decorated with helper overloads (see `src/client-helpers.ts`). We intentionally avoid subclassing or patching the upstream class so we can adopt SDK updates without tracking its constructor/private internals. Always add new ergonomics through the decorator instead of modifying the SDK class directly.
+
+## GitHub Actions
+
+CI follows the Linux/Windows template used by each-package: Node 26, `npm ci`, `prepublishOnly`, a current-runtime test run, and the supported-engine sweep. macOS coverage runs locally. Pull requests receive no provider credentials.
+
+`npm run test:ci` and `npm run test:ci:engines` run the credential-free selection. They exclude `test/integration/auth/todoist-oauth.test.ts`. These files require provider configuration, live services, or interactive consent; some also contain local checks. Their exclusion is a coverage gap until the separate live-service automation is provisioned.
+
+`npm test` and `npm run test:engines` retain full discovery. CI sets `TEST_INCLUDE_MANUAL=false`; consent tests require a person and run locally with `TEST_INCLUDE_MANUAL=true`. A green credential-free check does not certify live-provider behavior. Release evidence must include the configured live suites and relevant manual OAuth flows.
+
+The `Todoist Discovery` workflow runs the six public metadata discovery tests on Ubuntu and Windows with Node 26 every Tuesday at 06:17 UTC, and can be dispatched on `master`. It needs no provider credentials and keeps the browser consent tests disabled.
