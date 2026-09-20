@@ -15,7 +15,7 @@
 Handles DCR registration, OAuth flows, and token management</p>
 </div></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/511fc6da97f8453ea5e524d736fbafb684663625/src/dcr/dcr-authenticator.ts#L59">src/dcr/dcr-authenticator.ts:59</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/f6a438c3a31befbeae3c8a44fa930b811c27bb33/src/dcr/dcr-authenticator.ts#L59">src/dcr/dcr-authenticator.ts:59</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -45,7 +45,7 @@ Handles DCR registration, OAuth flows, and token management</p>
 <li><span><span class="tsd-kind-parameter">options</span>: <a href="../interfaces/DcrAuthenticatorOptions.html" class="tsd-signature-type tsd-kind-interface">DcrAuthenticatorOptions</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <a href="" class="tsd-signature-type tsd-kind-class">DcrAuthenticator</a></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/511fc6da97f8453ea5e524d736fbafb684663625/src/dcr/dcr-authenticator.ts#L67">src/dcr/dcr-authenticator.ts:67</a></li></ul></aside></div></li></ul></section></section></details>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/f6a438c3a31befbeae3c8a44fa930b811c27bb33/src/dcr/dcr-authenticator.ts#L67">src/dcr/dcr-authenticator.ts:67</a></li></ul></aside></div></li></ul></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -70,12 +70,12 @@ RFC 8707 resource, precisely so this can find them without doing discovery.</p>
 <h4 class="tsd-anchor-link" id="throws">Throws<a href="#throws" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><p>CredentialBindingError if the configured store cannot enumerate keys.</p>
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/511fc6da97f8453ea5e524d736fbafb684663625/src/dcr/dcr-authenticator.ts#L338">src/dcr/dcr-authenticator.ts:338</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/f6a438c3a31befbeae3c8a44fa930b811c27bb33/src/dcr/dcr-authenticator.ts#L343">src/dcr/dcr-authenticator.ts:343</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="ensureauthenticated"><span>ensure<wbr/>Authenticated</span><a href="#ensureauthenticated" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
 <li class="">
-<div class="tsd-signature tsd-anchor-link" id="ensureauthenticated-1"><span class="tsd-kind-call-signature">ensureAuthenticated</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">mcpServerUrl</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">capabilities</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/AuthCapabilities.html" class="tsd-signature-type tsd-kind-interface">AuthCapabilities</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span><a href="#ensureauthenticated-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-signature tsd-anchor-link" id="ensureauthenticated-1"><span class="tsd-kind-call-signature">ensureAuthenticated</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">mcpServerUrl</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">capabilities</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/AuthCapabilities.html" class="tsd-signature-type tsd-kind-interface">AuthCapabilities</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">signal</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">AbortSignal</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span><a href="#ensureauthenticated-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
 <div class="tsd-comment tsd-typography"><p>Ensure server is authenticated, performing DCR and OAuth if needed
 Proactively refreshes tokens if they're within 5 minutes of expiry</p>
@@ -90,7 +90,8 @@ the path is what identifies the resource an issued token is bound to.</p>
 </div></li>
 <li><span><span class="tsd-kind-parameter">capabilities</span>: <a href="../interfaces/AuthCapabilities.html" class="tsd-signature-type tsd-kind-interface">AuthCapabilities</a></span>
 <div class="tsd-comment tsd-typography"><p>Auth capabilities from .well-known endpoint</p>
-</div></li></ul></div>
+</div></li>
+<li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">signal</span>: <span class="tsd-signature-type">AbortSignal</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/TokenSet.html" class="tsd-signature-type tsd-kind-interface">TokenSet</a><span class="tsd-signature-symbol">&gt;</span></h4><p>Valid token set ready to use</p>
 
 <div class="tsd-comment tsd-typography">
@@ -103,7 +104,7 @@ the path is what identifies the resource an issued token is bound to.</p>
 
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/511fc6da97f8453ea5e524d736fbafb684663625/src/dcr/dcr-authenticator.ts#L123">src/dcr/dcr-authenticator.ts:123</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/f6a438c3a31befbeae3c8a44fa930b811c27bb33/src/dcr/dcr-authenticator.ts#L123">src/dcr/dcr-authenticator.ts:123</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
