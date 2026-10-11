@@ -65,15 +65,16 @@
 <li><code>client.getPrompt(name, args)</code></li>
 <li><code>client.readResource(uri)</code></li>
 <li><code>client.listTools()</code> / <code>client.listResources()</code> / <code>client.listPrompts()</code></li>
-<li><code>client.callToolRaw()</code> / <code>client.getPromptRaw()</code> / <code>client.readResourceRaw()</code> (raw SDK responses)</li>
 </ul>
+<p><code>client.nativeClient</code> is the original SDK instance. The managed client is a separate view of the same connection; stdio clients also have registry leases. Closing a stdio lease releases its reference, while closing the native instance closes the connection directly.</p>
 <h3 id="response-helpers" class="tsd-anchor-link">Response helpers<a href="#response-helpers" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <p>Tool, prompt, and resource calls return wrappers with:</p>
 <ul>
 <li><code>json()</code> - Parse structured content</li>
 <li><code>text()</code> - First text result</li>
-<li><code>raw()</code> - Raw MCP response</li>
 </ul>
+<p>Responses expose typed MCP fields: tools have <code>content</code>, <code>structuredContent</code>, and <code>isError</code>; prompts have <code>description</code> and <code>messages</code>; resources have <code>contents</code>. Each response exposes <code>_meta</code>. These properties retain non-text messages, roles, binary data, MIME types, and all entries. <code>JSON.stringify(response)</code> serializes the original MCP result, including server extensions. <code>json()</code> continues to convert content rather than return the protocol envelope.</p>
+<p>An awaited managed tool call rejects an MCP <code>isError</code> result with <code>ToolResponseError</code>; its <code>response</code> retains the complete error result. Protocol and transport errors also reject. Conversion failures occur when calling <code>json()</code> or <code>text()</code>.</p>
 <h2 id="examples" class="tsd-anchor-link">Examples<a href="#examples" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <h3 id="call-a-tool" class="tsd-anchor-link">Call a tool<a href="#call-a-tool" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <pre><code class="ts"><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">response</span><span class="hl-1"> = </span><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-4">client</span><span class="hl-1">.</span><span class="hl-0">callTool</span><span class="hl-1">(</span><span class="hl-2">&#39;drive-search&#39;</span><span class="hl-1">, { </span><span class="hl-4">query:</span><span class="hl-1"> </span><span class="hl-2">&#39;Q4 Reports&#39;</span><span class="hl-1"> });</span><br/><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">data</span><span class="hl-1"> = </span><span class="hl-4">response</span><span class="hl-1">.</span><span class="hl-0">json</span><span class="hl-1">();</span>
