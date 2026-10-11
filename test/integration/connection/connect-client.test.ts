@@ -151,7 +151,7 @@ describe('registry.connect', () => {
     clients.push(client);
 
     const prompt = await client.getPrompt({ name: 'echo', arguments: { message: 'test-prompt-message' } });
-    const result = prompt.raw();
+    const result = prompt;
 
     assert.ok(result.messages.length > 0, 'Should have messages');
     const message = result.messages[0];
@@ -183,7 +183,7 @@ describe('registry.connect', () => {
     clients.push(client);
 
     const resource = await client.readResource({ uri: 'echo://test-resource-message' });
-    const result = resource.raw();
+    const result = resource;
 
     assert.ok(result.contents.length > 0, 'Should have contents');
     const content = result.contents[0];
@@ -203,7 +203,7 @@ describe('registry.connect', () => {
     clients.push(client);
 
     const invocation = await client.callTool({ name: 'echo', arguments: { message: 'test-message' } });
-    const result = invocation.raw();
+    const result = invocation;
 
     const content = (result.content ?? []) as unknown[];
     assert.ok(content.length > 0, 'Should have content');
@@ -222,7 +222,7 @@ describe('registry.connect', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     const controller = new AbortController();
     const reason = new Error('connection setup cancelled');
@@ -269,7 +269,7 @@ describe('registry.connect', () => {
       }
       response.writeHead(404).end();
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     const controller = new AbortController();
     const abortError = new Error('connection setup cancelled');
@@ -313,7 +313,7 @@ describe('registry.connect', () => {
         request.socket.once('close', socketClosed);
         requestSeen();
       });
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
       const url = new URL(`http://127.0.0.1:${port}/mcp`);
       const client = new Client({ name: 'connection-deadline-test', version: '1.0.0' }, { capabilities: {} });

@@ -119,7 +119,8 @@ Stdio shutdown sends EOF to the owned process first. If it remains open, POSIX s
 - `client.getPrompt(name, args)`
 - `client.readResource(uri)`
 - `client.listTools()` / `client.listResources()` / `client.listPrompts()`
-- `client.callToolRaw()` / `client.getPromptRaw()` / `client.readResourceRaw()` (raw SDK responses)
+
+`client.nativeClient` is the original SDK instance. The managed client is a separate view of the same connection; stdio clients also have registry leases. Closing a stdio lease releases its reference, while closing the native instance closes the connection directly.
 
 ### Response helpers
 
@@ -127,7 +128,10 @@ Tool, prompt, and resource calls return wrappers with:
 
 - `json()` - Parse structured content
 - `text()` - First text result
-- `raw()` - Raw MCP response
+
+Responses expose typed MCP fields: tools have `content`, `structuredContent`, and `isError`; prompts have `description` and `messages`; resources have `contents`. Each response exposes `_meta`. These properties retain non-text messages, roles, binary data, MIME types, and all entries. `JSON.stringify(response)` serializes the original MCP result, including server extensions. `json()` continues to convert content rather than return the protocol envelope.
+
+An awaited managed tool call rejects an MCP `isError` result with `ToolResponseError`; its `response` retains the complete error result. Protocol and transport errors also reject. Conversion failures occur when calling `json()` or `text()`.
 
 ## Examples
 

@@ -103,7 +103,7 @@ describe('ExistingProcessTransport', () => {
       arguments: { message: 'test-message' },
     });
 
-    const result = wrapped.raw();
+    const result = wrapped;
     const content = (result.content ?? []) as unknown[];
     assert.ok(content.length > 0);
     assert.strictEqual(content.length, 1);
@@ -149,7 +149,7 @@ describe('ExistingProcessTransport', () => {
     assert.ok(echoResource, 'Should have echo resources');
 
     const resource = await client1.readResource({ uri: 'echo://test-message' });
-    const content = resource.raw();
+    const content = resource;
     assert.ok(content.contents);
     assert.ok(content.contents.length > 0);
   });
@@ -171,7 +171,7 @@ describe('ExistingProcessTransport', () => {
       arguments: { message: 'test-prompt-message' },
     });
 
-    const result = prompt.raw();
+    const result = prompt;
     assert.ok(result.messages);
     assert.ok(result.messages.length > 0);
   });

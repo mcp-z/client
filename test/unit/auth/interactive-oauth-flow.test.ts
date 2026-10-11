@@ -88,7 +88,7 @@ describe('unit/auth/interactive-oauth-flow', () => {
   });
 
   async function runFlow(callbackParams: Record<string, string>, overrides: Partial<OAuthFlowOptions> = {}) {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
     const redirectUri = `http://localhost:${port}/callback`;
     const recorder = createAuthorizeUrlRecorder();
 

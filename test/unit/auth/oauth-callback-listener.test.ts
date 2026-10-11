@@ -11,7 +11,7 @@ import getPort from 'get-port';
 
 describe('unit/auth/oauth-callback-listener', () => {
   it('should start on provided port', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
     const listener = new OAuthCallbackListener({ port });
 
     await listener.start();
@@ -21,7 +21,7 @@ describe('unit/auth/oauth-callback-listener', () => {
   });
 
   it('should fail fast when port is already in use', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
 
     // Block the port
     const blockingServer = http.createServer();
@@ -46,7 +46,7 @@ describe('unit/auth/oauth-callback-listener', () => {
   });
 
   it('should handle callback with auth code', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
     const listener = new OAuthCallbackListener({ port });
 
     await listener.start();
@@ -67,7 +67,7 @@ describe('unit/auth/oauth-callback-listener', () => {
   });
 
   it('should handle callback with error', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
     const listener = new OAuthCallbackListener({ port });
 
     await listener.start();
@@ -93,7 +93,7 @@ describe('unit/auth/oauth-callback-listener', () => {
   });
 
   it('should timeout when no callback received', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: 'localhost' });
     const listener = new OAuthCallbackListener({ port });
 
     await listener.start();

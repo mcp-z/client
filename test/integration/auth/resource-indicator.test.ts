@@ -111,7 +111,7 @@ async function startAuthServer(opts: { publishPrm: boolean }): Promise<{ base: s
  */
 async function authenticate(base: string, mcpServerUrl: string) {
   const capabilities = await probeAuthCapabilities(mcpServerUrl);
-  const port = await getPort();
+  const port = await getPort({ host: 'localhost' });
   const authenticator = new DcrAuthenticator({
     tokenStore: new Keyv(),
     headless: true,

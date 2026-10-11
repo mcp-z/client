@@ -142,11 +142,27 @@ describe('createServerRegistry', () => {
     assert.ok(server?.process, 'npm launcher should resolve to a process');
     assert.strictEqual(server.config.shell, false, 'direct executables should not receive an unnecessary shell wrapper');
     const childClose = waitForChildClose(server.process);
+    const naturalExitTimeoutMs = 5000; // Match the registry's graceful shutdown window.
+    let exitTimer: NodeJS.Timeout | undefined;
+    const closedNaturally = await Promise.race([
+      childClose,
+      new Promise<undefined>((resolve) => {
+        exitTimer = setTimeout(() => resolve(undefined), naturalExitTimeoutMs);
+      }),
+    ]).finally(() => {
+      if (exitTimer) clearTimeout(exitTimer);
+    });
+
+    if (!closedNaturally) {
+      const cleanupResult = await registry.close();
+      registry = undefined;
+      assert.deepStrictEqual(cleanupResult, { timedOut: false, killedCount: 0 }, 'registry cleanup after the launcher deadline should remain graceful');
+      assert.fail(`npm launcher did not complete naturally within ${naturalExitTimeoutMs}ms`);
+    }
 
     const result = await registry.close();
-    const closed = await childClose;
     assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 });
-    assert.strictEqual(closed.code, 0, 'npm launcher should complete normally');
+    assert.strictEqual(closedNaturally.code, 0, 'npm launcher should complete normally');
     registry = undefined;
   });
 
@@ -224,7 +240,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should cooperatively stop an owned HTTP server and await stream closure', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const shutdownUrl = `http://127.0.0.1:${port}/__mcpz/shutdown`;
     const serverRegistry = createServerRegistry(
       {
@@ -269,7 +285,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should preserve an external HTTP server when its registry closes', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const url = `http://127.0.0.1:${port}/mcp`;
     const externalProcess = spawn(process.execPath, [path.join(projectRoot, 'test/lib/servers/long-lived-http.mjs'), '--port', String(port)], {
       stdio: 'ignore',
@@ -291,7 +307,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should cooperatively stop owned HTTP servers without a shell wrapper', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const start: StartConfig = {
       command: 'node',
       args: ['test/lib/servers/long-lived-http.mjs', '--port', String(port)],
@@ -333,12 +349,41 @@ describe('createServerRegistry', () => {
     assert.ok(server?.process.pid, 'unresponsive process should have a process ID');
     const childClose = waitForChildClose(server.process);
 
-    const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
-    const closed = await childClose;
-    assert.strictEqual(result.timedOut, true, 'unresponsive process should exceed its cooperative close timeout');
-    assert.strictEqual(result.killedCount, 1, 'emergency process-tree termination should be reported');
-    assert.ok(closed.code !== 0 || closed.signal !== null, 'the child should close after emergency termination');
-    await waitForProcessExit(server.process.pid, 2000);
+    try {
+      const stderr = server.process.stderr;
+      assert.ok(stderr, 'unresponsive fixture should expose stderr');
+      await new Promise<void>((resolve, reject) => {
+        let output = '';
+        const timer = setTimeout(() => finish(new Error('Unresponsive fixture did not acknowledge readiness')), 5000);
+        const finish = (error?: Error) => {
+          clearTimeout(timer);
+          stderr.off('data', onData);
+          stderr.off('error', onError);
+          server.process.off('close', onClose);
+          server.process.off('error', onError);
+          if (error) reject(error);
+          else resolve();
+        };
+        const onData = (chunk: Buffer | string) => {
+          output += chunk.toString();
+          if (/^READY\r?$/m.test(output)) finish();
+        };
+        const onError = (error: Error) => finish(error);
+        const onClose = (code: number | null, signal: NodeJS.Signals | null) => finish(new Error(`Unresponsive fixture closed before readiness (code=${code}, signal=${signal})`));
+        stderr.on('data', onData);
+        stderr.once('error', onError);
+        server.process.once('close', onClose);
+        server.process.once('error', onError);
+      });
+      const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+      const closed = await childClose;
+      assert.strictEqual(result.timedOut, true, 'unresponsive process should exceed its cooperative close timeout');
+      assert.strictEqual(result.killedCount, 1, 'emergency process-tree termination should be reported');
+      assert.ok(closed.code !== 0 || closed.signal !== null, 'the child should close after emergency termination');
+      await waitForProcessExit(server.process.pid, 2000);
+    } finally {
+      await serverRegistry.close();
+    }
   });
 
   it('should report launcher closure without claiming Windows descendant containment', async () => {
@@ -380,7 +425,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should bound a hanging stop command and expose its Windows descendant limit', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const pidFile = path.resolve('.tmp', `hanging-stop-${process.pid}-${Date.now()}.pid`);
     fs.mkdirSync(path.dirname(pidFile), { recursive: true });
     const stopRegistry = createServerRegistry(
@@ -425,7 +470,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should report stop failures after attempting cleanup of every owned process', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const failingRegistry = createServerRegistry(
       {
         'bad-stop': {
@@ -663,7 +708,7 @@ describe('createServerRegistry', () => {
   });
 
   it('should preserve external ownership when spawning is disabled', async () => {
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     const url = `http://127.0.0.1:${port}/mcp`;
     const shutdownUrl = `http://127.0.0.1:${port}/__mcpz/shutdown`;
     const config = {

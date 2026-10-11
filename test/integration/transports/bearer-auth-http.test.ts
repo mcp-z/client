@@ -93,7 +93,7 @@ describe('bearer auth http transport', () => {
     }
 
     const wrapped = await client.callTool({ name: 'echo', arguments: { message: 'auth-test' } });
-    const result = wrapped.raw();
+    const result = wrapped;
 
     const content = (result.content ?? []) as unknown[];
     assert.ok(content.length > 0, 'Should have content');
@@ -171,7 +171,7 @@ describe('bearer auth http transport', () => {
     }
 
     const resource = await client.readResource({ uri: 'echo://auth-resource' });
-    const result = resource.raw();
+    const result = resource;
 
     assert.ok(result.contents.length > 0, 'Should have contents');
     const content = result.contents[0];
@@ -204,7 +204,7 @@ describe('bearer auth http transport', () => {
     }
 
     const prompt = await client.getPrompt({ name: 'echo', arguments: { message: 'auth-prompt' } });
-    const result = prompt.raw();
+    const result = prompt;
 
     assert.ok(result.messages.length > 0, 'Should have messages');
     const message = result.messages[0];

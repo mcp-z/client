@@ -21,7 +21,7 @@ describe('unit/auth/discovery-fetch', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     const controller = new AbortController();
     const reason = new Error('discovery cancelled');
@@ -155,7 +155,7 @@ describe('unit/auth/discovery-fetch', () => {
     let loopbackUrl: string;
 
     before(async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       server = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
@@ -237,7 +237,7 @@ describe('unit/auth/discovery-fetch', () => {
 
   describe('redirect validation (every hop is re-checked)', () => {
     it('should reject a redirect from an allowed loopback origin to an internal address it does not also grant', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       const server = http.createServer((_req, res) => {
         res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' });
         res.end();
@@ -263,7 +263,7 @@ describe('unit/auth/discovery-fetch', () => {
     });
 
     it('should reject that same redirect chain outright with no grant at all', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       const server = http.createServer((_req, res) => {
         res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' });
         res.end();
@@ -278,7 +278,7 @@ describe('unit/auth/discovery-fetch', () => {
     });
 
     it('should reject a redirect chain that exceeds the hop limit', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       const server = http.createServer((req, res) => {
         const n = Number(new URL(req.url || '/', `http://127.0.0.1:${port}`).searchParams.get('n') || '0');
         res.writeHead(302, { Location: `http://127.0.0.1:${port}/?n=${n + 1}` });
@@ -298,8 +298,8 @@ describe('unit/auth/discovery-fetch', () => {
     });
 
     it('should follow a redirect to another allowed (loopback) address under a grant', async () => {
-      const portA = await getPort();
-      const portB = await getPort();
+      const portA = await getPort({ host: '127.0.0.1' });
+      const portB = await getPort({ host: '127.0.0.1' });
 
       const serverB = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -327,7 +327,7 @@ describe('unit/auth/discovery-fetch', () => {
 
   describe('response body size cap', () => {
     it('should reject a response larger than the configured cap', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       const server = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         // Larger than the 1MB cap. The cap is enforced while reading the
@@ -358,7 +358,7 @@ describe('unit/auth/discovery-fetch', () => {
     // the actual request" spec.
 
     it('refuses the request when the host rebinding-swaps its answer between validation and the request', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       let hits = 0;
       const server = http.createServer((_req, res) => {
         hits += 1;
@@ -396,7 +396,7 @@ describe('unit/auth/discovery-fetch', () => {
     });
 
     it('pins the validated answer into the request so a later rebinding answer is never dialed', async () => {
-      const port = await getPort();
+      const port = await getPort({ host: '127.0.0.1' });
       const server = http.createServer((_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ pinned: true }));
@@ -492,7 +492,7 @@ describe('unit/auth/discovery-fetch', () => {
 
   describe('error messages do not leak network details', () => {
     it('should surface a fixed generic message on connection failure, never the underlying error', async () => {
-      const port = await getPort(); // guaranteed nothing listening
+      const port = await getPort({ host: '127.0.0.1' });
       await assert.rejects(discoveryFetch(`http://127.0.0.1:${port}/`, {}, 'internal probe', { allowLoopback: true }), (error: Error) => {
         assert.ok(error instanceof DiscoveryFetchError);
         assert.strictEqual(error.message, 'Failed to fetch internal probe');

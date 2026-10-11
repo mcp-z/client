@@ -5,7 +5,7 @@ description: Use @mcp-z/client from Node.js code. Load when writing or reviewing
 
 # @mcp-z/client
 
-`@mcp-z/client` manages MCP server configuration, process startup, connections, discovery, calls, and cleanup. Use the package's wrappers for ordinary tool, prompt, and resource calls. Reach for the raw MCP SDK responses only when the wrapper omits data the caller needs.
+`@mcp-z/client` manages MCP server configuration, process startup, connections, discovery, calls, and cleanup. Tool, prompt and resource calls return normal responses with typed MCP data and representation helpers.
 
 ## Install
 
@@ -29,9 +29,9 @@ The convenience methods accept simple arguments:
 - `client.getPrompt(name, args)`
 - `client.readResource(uri)`
 
-Their response wrappers expose `json()`, `text()`, and `raw()`. For tools, `json()` returns `structuredContent` when present and otherwise parses the first text block. Wrapper methods throw a typed response error for MCP error results or incompatible content.
+Tool responses expose `content`, `structuredContent`, `isError` and `_meta`; prompt responses expose `description`, `messages` and `_meta`; resource responses expose `contents` and `_meta`. The `json()` and `text()` helpers retain their conversion semantics. For tools, `json()` returns `structuredContent` when present and otherwise parses the first text block. Use `JSON.stringify(response)` to serialize the complete MCP result, including extensions.
 
-Use `callToolRaw()`, `getPromptRaw()`, or `readResourceRaw()` only when the caller needs the untouched SDK response.
+An awaited `callTool()` rejects an MCP `isError` result with `ToolResponseError`; its `response` retains the complete MCP error result. Protocol and transport rejections propagate. Parsing or incompatible-content failures occur when calling `json()` or `text()`.
 
 ## Examples
 

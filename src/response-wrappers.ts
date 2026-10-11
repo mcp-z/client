@@ -18,14 +18,31 @@ export class ToolResponseError extends Error {
 }
 
 export class ToolResponseWrapper {
-  private readonly payload: NativeCallToolResponse;
+  readonly #payload: NativeCallToolResponse;
 
   constructor(payload: NativeCallToolResponse) {
-    this.payload = payload;
+    this.#payload = payload;
+    this.throwIfError();
   }
 
-  raw(): NativeCallToolResponse {
-    return this.payload;
+  get content(): NativeCallToolResponse['content'] {
+    return this.#payload.content;
+  }
+
+  get structuredContent(): NativeCallToolResponse['structuredContent'] {
+    return this.#payload.structuredContent;
+  }
+
+  get isError(): NativeCallToolResponse['isError'] {
+    return this.#payload.isError;
+  }
+
+  get _meta(): NativeCallToolResponse['_meta'] {
+    return this.#payload._meta;
+  }
+
+  toJSON(): NativeCallToolResponse {
+    return this.#payload;
   }
 
   json<T = unknown>(validator?: JsonValidator<T>): T {
@@ -38,58 +55,58 @@ export class ToolResponseWrapper {
   }
 
   text(): string {
-    if (isCompatibilityResult(this.payload)) {
-      if (typeof this.payload.toolResult === 'string') {
-        return this.payload.toolResult;
+    if (isCompatibilityResult(this.#payload)) {
+      if (typeof this.#payload.toolResult === 'string') {
+        return this.#payload.toolResult;
       }
-      throw new ToolResponseError('Compatibility tool result is not text', this.payload);
+      throw new ToolResponseError('Compatibility tool result is not text', this.#payload);
     }
 
     this.throwIfError();
 
-    const textBlock = findFirstTextBlock(this.payload.content ?? []);
+    const textBlock = findFirstTextBlock(this.#payload.content ?? []);
     if (!textBlock) {
-      throw new ToolResponseError('Tool response did not include text content', this.payload);
+      throw new ToolResponseError('Tool response did not include text content', this.#payload);
     }
 
     return textBlock.text;
   }
 
   private resolveJsonPayload(): unknown {
-    if (isCompatibilityResult(this.payload)) {
-      return this.payload.toolResult;
+    if (isCompatibilityResult(this.#payload)) {
+      return this.#payload.toolResult;
     }
 
     this.throwIfError();
 
-    if (hasStructuredContent(this.payload)) {
-      return this.payload.structuredContent;
+    if (hasStructuredContent(this.#payload)) {
+      return this.#payload.structuredContent;
     }
 
-    const textBlock = findFirstTextBlock(this.payload.content ?? []);
+    const textBlock = findFirstTextBlock(this.#payload.content ?? []);
     if (!textBlock) {
-      throw new ToolResponseError('Tool response did not include structuredContent or text content', this.payload);
+      throw new ToolResponseError('Tool response did not include structuredContent or text content', this.#payload);
     }
 
     try {
       return JSON.parse(textBlock.text) as unknown;
     } catch (error) {
       const reason = formatErrorReason(error);
-      throw new ToolResponseError(`Failed to parse tool text content as JSON: ${reason}`, this.payload);
+      throw new ToolResponseError(`Failed to parse tool text content as JSON: ${reason}`, this.#payload);
     }
   }
 
   private throwIfError(): void {
-    if ('isError' in this.payload && this.payload.isError) {
-      let detail = typeof this.payload.error === 'object' && this.payload.error && 'message' in this.payload.error ? String((this.payload.error as { message?: unknown }).message ?? '') : '';
+    if ('isError' in this.#payload && this.#payload.isError) {
+      let detail = typeof this.#payload.error === 'object' && this.#payload.error && 'message' in this.#payload.error ? String((this.#payload.error as { message?: unknown }).message ?? '') : '';
       if (!detail) {
-        const textBlock = findFirstTextBlock((this.payload.content ?? []) as ContentBlock[]);
+        const textBlock = findFirstTextBlock((this.#payload.content ?? []) as ContentBlock[]);
         if (textBlock?.text) {
           detail = textBlock.text;
         }
       }
       const message = detail ? `Tool invocation returned an error result: ${detail}` : 'Tool invocation returned an error result';
-      throw new ToolResponseError(message, this.payload);
+      throw new ToolResponseError(message, this.#payload);
     }
   }
 }
@@ -105,20 +122,32 @@ export class PromptResponseError extends Error {
 }
 
 export class PromptResponseWrapper {
-  private readonly payload: NativeGetPromptResponse;
+  readonly #payload: NativeGetPromptResponse;
 
   constructor(payload: NativeGetPromptResponse) {
-    this.payload = payload;
+    this.#payload = payload;
   }
 
-  raw(): NativeGetPromptResponse {
-    return this.payload;
+  get description(): NativeGetPromptResponse['description'] {
+    return this.#payload.description;
+  }
+
+  get messages(): NativeGetPromptResponse['messages'] {
+    return this.#payload.messages;
+  }
+
+  get _meta(): NativeGetPromptResponse['_meta'] {
+    return this.#payload._meta;
+  }
+
+  toJSON(): NativeGetPromptResponse {
+    return this.#payload;
   }
 
   text(): string {
-    const segments = collectPromptText(this.payload.messages);
+    const segments = collectPromptText(this.#payload.messages);
     if (!segments.length) {
-      throw new PromptResponseError('Prompt response did not include text content', this.payload);
+      throw new PromptResponseError('Prompt response did not include text content', this.#payload);
     }
     return segments.join('\n\n');
   }
@@ -134,7 +163,7 @@ export class PromptResponseWrapper {
       return parsed as T;
     } catch (error) {
       const reason = formatErrorReason(error);
-      throw new PromptResponseError(`Failed to parse prompt text as JSON: ${reason}`, this.payload);
+      throw new PromptResponseError(`Failed to parse prompt text as JSON: ${reason}`, this.#payload);
     }
   }
 }
@@ -150,14 +179,22 @@ export class ResourceResponseError extends Error {
 }
 
 export class ResourceResponseWrapper {
-  private readonly payload: NativeReadResourceResponse;
+  readonly #payload: NativeReadResourceResponse;
 
   constructor(payload: NativeReadResourceResponse) {
-    this.payload = payload;
+    this.#payload = payload;
   }
 
-  raw(): NativeReadResourceResponse {
-    return this.payload;
+  get contents(): NativeReadResourceResponse['contents'] {
+    return this.#payload.contents;
+  }
+
+  get _meta(): NativeReadResourceResponse['_meta'] {
+    return this.#payload._meta;
+  }
+
+  toJSON(): NativeReadResourceResponse {
+    return this.#payload;
   }
 
   text(): string {
@@ -170,10 +207,10 @@ export class ResourceResponseWrapper {
         return Buffer.from(entry.blob, 'base64').toString('utf8');
       } catch (error) {
         const reason = formatErrorReason(error);
-        throw new ResourceResponseError(`Failed to decode resource blob as UTF-8 text: ${reason}`, this.payload);
+        throw new ResourceResponseError(`Failed to decode resource blob as UTF-8 text: ${reason}`, this.#payload);
       }
     }
-    throw new ResourceResponseError('Resource content does not include text or blob data', this.payload);
+    throw new ResourceResponseError('Resource content does not include text or blob data', this.#payload);
   }
 
   json<T = unknown>(validator?: JsonValidator<T>): T {
@@ -187,14 +224,14 @@ export class ResourceResponseWrapper {
       return parsed as T;
     } catch (error) {
       const reason = formatErrorReason(error);
-      throw new ResourceResponseError(`Failed to parse resource text as JSON: ${reason}`, this.payload);
+      throw new ResourceResponseError(`Failed to parse resource text as JSON: ${reason}`, this.#payload);
     }
   }
 
   private firstEntry(): NativeReadResourceResponse['contents'][number] {
-    const [entry] = this.payload.contents ?? [];
+    const [entry] = this.#payload.contents ?? [];
     if (!entry) {
-      throw new ResourceResponseError('Resource response did not include any contents', this.payload);
+      throw new ResourceResponseError('Resource response did not include any contents', this.#payload);
     }
     return entry;
   }

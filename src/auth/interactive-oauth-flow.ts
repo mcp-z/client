@@ -41,7 +41,7 @@ export class InteractiveOAuthFlow {
    * import getPort from 'get-port';
    *
    * const flow = new InteractiveOAuthFlow();
-   * const port = await getPort();
+   * const port = await getPort({ host: 'localhost' });
    * const tokens = await flow.performAuthFlow(
    *   'https://example.com/oauth/authorize',
    *   'https://example.com/oauth/token',

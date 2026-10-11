@@ -291,7 +291,7 @@ export async function connectMcpClient(
       logger.debug(`🔐 Server '${serverName}' supports DCR authentication`);
 
       // Get available port and create the exact redirect URI to use
-      const port = await getPort();
+      const port = await getPort({ host: 'localhost' });
       const redirectUri = `http://localhost:${port}/callback`;
 
       // Handle authentication using DcrAuthenticator with fully resolved redirectUri

@@ -32,7 +32,7 @@ describe('unit/auth/capability-discovery', () => {
     const server = http.createServer(() => {
       requestCount += 1;
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     const controller = new AbortController();
     const reason = new Error('discovery cancelled before it started');
@@ -57,7 +57,7 @@ describe('unit/auth/capability-discovery', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     const controller = new AbortController();
     const reason = new Error('resource discovery cancelled');
@@ -83,7 +83,7 @@ describe('unit/auth/capability-discovery', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort();
+    const port = await getPort({ host: '127.0.0.1' });
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
 
     try {

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0] - 2026-10-10
+
+### Changed
+
+- Remove `callToolRaw()`, `getPromptRaw()`, `readResourceRaw()` and response `raw()`. Use the corresponding managed call and its standard response fields, or `JSON.stringify(response)` for the complete MCP result including server extensions. Tool content/structuredContent, prompt description/messages, resource contents and metadata retain their data. Existing `json()` and `text()` conversions remain unchanged.
+- Awaited managed tool calls now reject MCP `isError` results with `ToolResponseError`; inspect `error.response` for the complete error result. Protocol/transport failures continue to reject, and representation failures occur during conversion.
+- The managed client is a separate view of the original SDK instance returned by `nativeClient`. Native methods retain SDK behavior and share the actual connection/state. Stdio lease close releases its reference; native close closes the connection directly. Callback and method references through the stdio lease need not retain identity.
+
+### Fixed
+
+- OAuth callback port selection checks availability on localhost, matching the callback listener's address and reducing startup failures caused by probing a different interface.
+
 ## [2.3.0] - 2026-09-20
 
 ### Added

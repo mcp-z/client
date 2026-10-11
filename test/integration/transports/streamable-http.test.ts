@@ -32,7 +32,7 @@ describe('http transport', () => {
 
   before(async () => {
     // Get available port dynamically
-    port = await getPort();
+    port = await getPort({ host: '127.0.0.1' });
     url = `http://localhost:${port}/mcp`;
 
     // Start HTTP server using createServerRegistry with start dialect (to spawn start blocks)
@@ -91,7 +91,7 @@ describe('http transport', () => {
     }
 
     const wrapped = await client.callTool({ name: 'echo', arguments: { message: 'test-message' } });
-    const result = wrapped.raw();
+    const result = wrapped;
 
     const content = (result.content ?? []) as unknown[];
     assert.ok(content.length > 0, 'Should have content');
@@ -121,7 +121,7 @@ describe('http transport', () => {
     }
 
     const resource = await client.readResource({ uri: 'echo://test-resource-message' });
-    const result = resource.raw();
+    const result = resource;
 
     assert.ok(result.contents.length > 0, 'Should have contents');
     const content = result.contents[0];
@@ -155,7 +155,7 @@ describe('http transport', () => {
     }
 
     const prompt = await client.getPrompt({ name: 'echo', arguments: { message: 'test-prompt-message' } });
-    const result = prompt.raw();
+    const result = prompt;
 
     assert.ok(result.messages.length > 0, 'Should have messages');
     const message = result.messages[0];

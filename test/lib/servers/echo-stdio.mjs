@@ -19,6 +19,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 async function main() {
+  let invocations = 0;
   const server = new McpServer({
     name: 'echo-stdio',
     version: '1.0.0',
@@ -30,11 +31,33 @@ async function main() {
     {
       title: 'Echo Tool',
       description: 'Echoes back the provided message',
-      inputSchema: { message: z.string() },
+      inputSchema: { message: z.string(), mode: z.enum(['rich', 'error']).optional() },
       outputSchema: { echo: z.string() },
     },
-    async ({ message }) => {
+    async ({ message, mode }) => {
+      invocations += 1;
       const output = { echo: `Tool echo: ${message}` };
+      if (mode === 'error') {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Cannot echo: ${message}` }],
+          error: { message: `Echo rejected: ${message}`, code: 'ECHO_REJECTED' },
+          _meta: { invocations },
+        };
+      }
+      if (mode === 'rich') {
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify(output) },
+            { type: 'image', data: 'AAEC', mimeType: 'image/png' },
+            { type: 'audio', data: 'AwQF', mimeType: 'audio/wav' },
+          ],
+          structuredContent: output,
+          _meta: { invocations, json: 'metadata extension' },
+          json: 'server json extension',
+          text: 'server text extension',
+        };
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify(output) }],
         structuredContent: output,
@@ -55,12 +78,19 @@ async function main() {
       description: 'Echoes back messages as resources',
     },
     async (uri, { message }) => ({
-      contents: [
-        {
-          uri: uri.href,
-          text: `Resource echo: ${message}`,
-        },
-      ],
+      ...(message === 'rich' ? { _meta: { fixture: 'echo-resource' }, json: 'resource extension' } : {}),
+      contents:
+        message === 'rich'
+          ? [
+              { uri: uri.href, blob: 'AAEC', mimeType: 'application/octet-stream' },
+              { uri: 'echo://second', text: '{"second":true}', mimeType: 'application/json' },
+            ]
+          : [
+              {
+                uri: uri.href,
+                text: `Resource echo: ${message}`,
+              },
+            ],
     })
   );
 
@@ -73,15 +103,23 @@ async function main() {
       argsSchema: { message: z.string() },
     },
     (args) => ({
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Please process this message: ${args.message}`,
-          },
-        },
-      ],
+      ...(args.message === 'rich' ? { description: 'Rich echo prompt', _meta: { fixture: 'echo-prompt' }, text: 'prompt extension' } : {}),
+      messages:
+        args.message === 'rich'
+          ? [
+              { role: 'user', content: { type: 'text', text: 'First message' } },
+              { role: 'assistant', content: { type: 'image', data: 'AAEC', mimeType: 'image/png' } },
+              { role: 'assistant', content: { type: 'text', text: 'Second message' } },
+            ]
+          : [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Please process this message: ${args.message}`,
+                },
+              },
+            ],
     })
   );
 

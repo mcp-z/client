@@ -22,13 +22,13 @@
     "ai",
     "claude"
   ],
-  "homepage": "https://github.com/mcp-z/cli#readme",
+  "homepage": "https://github.com/mcp-z/client#readme",
   "bugs": {
-    "url": "https://github.com/mcp-z/cli/issues"
+    "url": "https://github.com/mcp-z/client/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mcp-z/cli.git"
+    "url": "git+https://github.com/mcp-z/client.git"
   },
   "license": "MIT",
   "author": "Kevin Malakoff <kmalakoff.info@gmail.com>",
@@ -53,10 +53,10 @@
     "generate:types": "json2ts schemas/servers.schema.json schemas/servers.d.ts --bannerComment \"/* eslint-disable */\n/* Auto-generated from schemas/servers.schema.json - DO NOT EDIT */\"",
     "prepublish:check": "ncp",
     "prepublishOnly": "node scripts/require-dist-tag.cjs && tsds validate",
-    "test": "tsds test:node --require test/lib/env-loader.ts --no-timeouts",
-    "test:ci": "tsds test:node --require test/lib/env-loader.ts --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
-    "test:ci:engines": "nvu engines tsds test:node --require test/lib/env-loader.ts --no-timeouts --ignore \"test/integration/auth/todoist-oauth.test.ts\"",
-    "test:engines": "nvu engines tsds test:node --require test/lib/env-loader.ts --no-timeouts",
+    "test": "tsds test:node --no-timeouts",
+    "test:ci": "tsds test:node --no-timeouts",
+    "test:ci:engines": "nvu engines tsds test:node --no-timeouts",
+    "test:engines": "nvu engines tsds test:node --no-timeouts",
     "version": "tsds version"
   },
   "dependencies": {
@@ -80,9 +80,9 @@
     "express": "^5.0.0",
     "json-schema-to-typescript": "^16.0.0",
     "node-version-use": "^2.4.7",
+    "portable-env": "^1.4.0",
     "ts-dev-stack": "^1.22.1",
     "tsds-config": "^1.0.4",
-    "tsds-lib": "^1.22.6",
     "zod": "^4.0.0"
   },
   "engines": {
