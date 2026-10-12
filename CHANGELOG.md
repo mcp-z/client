@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.4.1] - 2026-10-12
+
+### Fixed
+
+- `registry.close()` no longer reports a shutdown failure when a POSIX server has already closed and its process group is empty, but sending the shutdown signal returns `EPERM`. The signal error remains logged; other shutdown failures still reject.
+
 ## [2.4.0] - 2026-10-10
 
 ### Changed

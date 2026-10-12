@@ -136,33 +136,18 @@ describe('createServerRegistry', () => {
     registry = undefined;
   });
 
-  it('should run command launchers without forcing a shell for direct executables', async () => {
+  it('should delegate npm command launchers without requesting an extra shell', async () => {
     registry = createServerRegistry({ npm: { command: 'npm', args: ['--version'] } }, { cwd: projectRoot });
     const server = registry.servers.get('npm');
     assert.ok(server?.process, 'npm launcher should resolve to a process');
-    assert.strictEqual(server.config.shell, false, 'direct executables should not receive an unnecessary shell wrapper');
+    assert.strictEqual(server.config.shell, false, 'the caller should not request an extra shell wrapper');
     const childClose = waitForChildClose(server.process);
-    const naturalExitTimeoutMs = 5000; // Match the registry's graceful shutdown window.
-    let exitTimer: NodeJS.Timeout | undefined;
-    const closedNaturally = await Promise.race([
-      childClose,
-      new Promise<undefined>((resolve) => {
-        exitTimer = setTimeout(() => resolve(undefined), naturalExitTimeoutMs);
-      }),
-    ]).finally(() => {
-      if (exitTimer) clearTimeout(exitTimer);
-    });
-
-    if (!closedNaturally) {
-      const cleanupResult = await registry.close();
-      registry = undefined;
-      assert.deepStrictEqual(cleanupResult, { timedOut: false, killedCount: 0 }, 'registry cleanup after the launcher deadline should remain graceful');
-      assert.fail(`npm launcher did not complete naturally within ${naturalExitTimeoutMs}ms`);
-    }
+    const closedNaturally = await childClose;
+    assert.strictEqual(closedNaturally.code, 0, 'npm launcher should complete normally');
+    assert.strictEqual(closedNaturally.signal, null, 'npm launcher should exit naturally without a signal');
 
     const result = await registry.close();
     assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 });
-    assert.strictEqual(closedNaturally.code, 0, 'npm launcher should complete normally');
     registry = undefined;
   });
 
@@ -237,6 +222,46 @@ describe('createServerRegistry', () => {
     assert.strictEqual(server.process.stderr?.destroyed, true, 'stderr should be closed after the child close event');
 
     registry = undefined;
+  });
+
+  it('should immediately close a finite inherited-stdio launcher without emergency termination', async () => {
+    const finiteRegistry = createServerRegistry(
+      {
+        'finite-http': {
+          type: 'http',
+          url: 'http://127.0.0.1:8080/mcp',
+          start: { command: 'echo', args: ['start http'] },
+        },
+        'finite-stdio': { command: 'echo', args: ['stdio'] },
+      },
+      { cwd: projectRoot, dialects: ['servers', 'start'] }
+    );
+    const server = finiteRegistry.servers.get('finite-http');
+    const stdioServer = finiteRegistry.servers.get('finite-stdio');
+    assert.ok(server?.process.pid, 'inherited-stdio launcher should have a process ID');
+    assert.ok(stdioServer?.process.pid, 'piped-stdio launcher should have a process ID');
+    const serverPid = server.process.pid;
+    const stdioPid = stdioServer.process.pid;
+    const childClose = waitForChildClose(server.process);
+    const stdioClose = waitForChildClose(stdioServer.process);
+    try {
+      const result = await finiteRegistry.close('SIGINT', { timeoutMs: 100 });
+      const closed = await childClose;
+      assert.deepStrictEqual(result, { timedOut: false, killedCount: 0 }, 'natural launcher completion should not require emergency termination');
+      assert.ok((closed.code === 0 && closed.signal === null) || (process.platform !== 'win32' && closed.code === null && closed.signal === 'SIGINT'), 'inherited-stdio launcher should exit naturally or through the configured POSIX SIGINT');
+      await stdioClose;
+      if (process.platform !== 'win32') {
+        for (const childPid of [serverPid, stdioPid]) {
+          assert.throws(
+            () => process.kill(-childPid, 0),
+            (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ESRCH',
+            'owned process groups should be absent after close'
+          );
+        }
+      }
+    } finally {
+      await Promise.all([childClose, stdioClose]);
+    }
   });
 
   it('should cooperatively stop an owned HTTP server and await stream closure', async () => {

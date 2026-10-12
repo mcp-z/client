@@ -25,6 +25,7 @@ interface ProcessCompletion {
   closed: boolean;
   processGroupEmpty?: boolean;
   error?: Error;
+  inspectionFailed?: boolean;
 }
 
 /**
@@ -87,17 +88,19 @@ async function waitForCompletion(closeEvent: Promise<ProcessCloseEvent>, childCl
 
   const deadline = Date.now() + timeoutMs;
   let lastError: Error | undefined;
+  let inspectionFailed = false;
   while (true) {
     let processGroupEmpty = false;
     try {
       processGroupEmpty = tree.isEmpty();
       lastError = undefined;
     } catch (error) {
+      inspectionFailed = true;
       lastError = error instanceof Error ? error : new Error(String(error));
     }
     const closed = childClosed();
-    if (closed && processGroupEmpty) return { closed, processGroupEmpty };
-    if (Date.now() >= deadline) return { closed, processGroupEmpty, ...(lastError && { error: lastError }) };
+    if (closed && processGroupEmpty) return { closed, processGroupEmpty, inspectionFailed };
+    if (Date.now() >= deadline) return { closed, processGroupEmpty, inspectionFailed, ...(lastError && { error: lastError }) };
     await delay(Math.min(PROCESS_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
   }
 }
@@ -247,6 +250,7 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
     let killed = false;
     const errors: Error[] = [];
     let stopSucceeded = false;
+    let pendingSignalError: Error | undefined;
 
     if (opts.stop) {
       try {
@@ -261,12 +265,22 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
       try {
         requestProcessSignal(child, signal);
       } catch (error) {
-        errors.push(withCause(`Server '${name}' cooperative signal failed: ${asError(error).message}`, asError(error)));
+        if (error instanceof Error && 'code' in error && error.code === 'EPERM') pendingSignalError = error;
+        else errors.push(withCause(`Server '${name}' cooperative signal failed: ${asError(error).message}`, asError(error)));
       }
     }
 
     let completion = await waitForCompletion(closeEvent, () => isClosed, tree, timeoutMs);
+    let inspectionFailed = completion.inspectionFailed === true;
     if (completion.error) errors.push(withCause(`Could not inspect the owned process tree for server '${name}'`, completion.error));
+    if (pendingSignalError) {
+      if (completion.closed && completion.processGroupEmpty === true && !completion.error && !inspectionFailed) {
+        logger.info(`[${name}] cooperative signal ${signal} returned EPERM (${pendingSignalError.message}); child close delivered and owned process group empty before emergency termination`);
+      } else {
+        errors.push(withCause(`Server '${name}' cooperative signal failed: ${pendingSignalError.message}`, pendingSignalError));
+      }
+      pendingSignalError = undefined;
+    }
 
     if (!isCompletionSuccessful(completion)) {
       timedOut = true;
@@ -274,10 +288,19 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
         try {
           requestProcessSignal(child, signal);
         } catch (error) {
-          errors.push(withCause(`Server '${name}' cooperative signal failed: ${asError(error).message}`, asError(error)));
+          if (error instanceof Error && 'code' in error && error.code === 'EPERM') pendingSignalError = error;
+          else errors.push(withCause(`Server '${name}' cooperative signal failed: ${asError(error).message}`, asError(error)));
         }
         completion = await waitForCompletion(closeEvent, () => isClosed, tree, timeoutMs);
+        inspectionFailed ||= completion.inspectionFailed === true;
         if (completion.error) errors.push(withCause(`Could not inspect the owned process tree for server '${name}'`, completion.error));
+        if (pendingSignalError) {
+          if (completion.closed && completion.processGroupEmpty === true && !completion.error && !inspectionFailed) {
+            logger.info(`[${name}] cooperative signal ${signal} returned EPERM (${pendingSignalError.message}); child close delivered and owned process group empty before emergency termination`);
+          } else {
+            errors.push(withCause(`Server '${name}' cooperative signal failed: ${pendingSignalError.message}`, pendingSignalError));
+          }
+        }
       } else if (!opts.stop && process.platform !== 'win32' && !child.stdin) {
         // The first signal was sent before waiting for an inherited-stdio HTTP process.
       }
