@@ -1,6 +1,7 @@
 import '../../lib/env-loader.ts';
 import type { CapabilityIndex, IndexedPrompt, IndexedResource, IndexedTool } from '@mcp-z/client';
-import { searchCapabilities } from '@mcp-z/client';
+import { buildCapabilityIndex, type CapabilityClient, searchCapabilities } from '@mcp-z/client';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/client';
 import assert from 'assert';
 
 describe('searchCapabilities', () => {
@@ -352,5 +353,50 @@ describe('searchCapabilities', () => {
       assert.strictEqual(lowerResult.total, upperResult.total);
       assert.strictEqual(lowerResult.total, mixedResult.total);
     });
+  });
+});
+
+describe('buildCapabilityIndex list failures', () => {
+  const empty = async () => ({ tools: [], prompts: [], resources: [] });
+  function clientWith(overrides: Record<string, () => Promise<unknown>>): CapabilityClient {
+    return { listTools: empty, listPrompts: empty, listResources: empty, ...overrides } as unknown as CapabilityClient;
+  }
+
+  it('should tolerate a server that answers MethodNotFound for a list method', async () => {
+    const client = clientWith({
+      listPrompts: async () => {
+        throw new ProtocolError(ProtocolErrorCode.MethodNotFound, 'Method not found');
+      },
+      listTools: async () => ({ tools: [{ name: 'only_tool', inputSchema: { type: 'object' } }] }),
+    });
+
+    const index = await buildCapabilityIndex(new Map([['srv', client]]));
+
+    assert.deepStrictEqual(
+      index.capabilities.map((c) => c.name),
+      ['only_tool']
+    );
+  });
+
+  it('should reject when a list call fails for any other reason', async () => {
+    const failure = new Error('connection closed');
+    const client = clientWith({
+      listTools: async () => {
+        throw failure;
+      },
+    });
+
+    await assert.rejects(buildCapabilityIndex(new Map([['srv', client]])), (error: unknown) => error === failure);
+  });
+
+  it('should reject on a JSON-RPC error other than MethodNotFound', async () => {
+    const failure = new ProtocolError(ProtocolErrorCode.InternalError, 'boom');
+    const client = clientWith({
+      listResources: async () => {
+        throw failure;
+      },
+    });
+
+    await assert.rejects(buildCapabilityIndex(new Map([['srv', client]])), (error: unknown) => error === failure);
   });
 });

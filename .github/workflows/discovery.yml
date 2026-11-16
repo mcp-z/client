@@ -1,7 +1,7 @@
 name: Todoist Discovery
 on:
   schedule:
-    - cron: '17 6 * * 2'
+    - cron: "17 6 * * 2"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TEST_INCLUDE_MANUAL: 'false'
+  TEST_INCLUDE_MANUAL: "false"
 
 jobs:
   test:

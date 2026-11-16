@@ -24,6 +24,21 @@ export function throwIfAborted(signal?: AbortSignal | null): void {
   signal?.throwIfAborted();
 }
 
+/**
+ * Runs a speculative discovery probe: a request to a location the server never
+ * advertised. Any failure except cancellation (network error, SSRF refusal,
+ * invalid JSON, oversize) means "not offered" and yields `null`; an abort
+ * still propagates. Locations the server advertised must not use this.
+ */
+export async function speculativeProbe<T>(signal: AbortSignal | undefined, probe: () => Promise<T | null>): Promise<T | null> {
+  try {
+    return await probe();
+  } catch {
+    throwIfAborted(signal);
+    return null;
+  }
+}
+
 type LookupRecord = { address: string; family: number };
 /** DNS implementation, injectable for deterministic tests. Same contract as `dns.lookup` with `{ all: true, verbatim: true }`. */
 type Lookup = (hostname: string, options: { all: true; verbatim: true }, callback: (error: NodeJS.ErrnoException | null, addresses: LookupRecord[]) => void) => void;

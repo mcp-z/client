@@ -4,7 +4,7 @@
  */
 
 import { normalizeUrl } from '../lib/url-utils.ts';
-import { isLoopbackUrl, throwIfAborted } from './discovery-fetch.ts';
+import { isLoopbackUrl, speculativeProbe, throwIfAborted } from './discovery-fetch.ts';
 import { discoverAuthorizationServerIssuer, discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from './rfc9728-discovery.ts';
 import type { AuthCapabilities, AuthorizationServerMetadata } from './types.ts';
 
@@ -88,54 +88,47 @@ async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string,
 
 export async function probeAuthCapabilities(baseUrl: string, options: { signal?: AbortSignal } = {}): Promise<AuthCapabilities> {
   const { signal } = options;
-  try {
-    throwIfAborted(signal);
-    const normalizedBaseUrl = normalizeUrl(baseUrl);
-    // Trust signal for every authorization-server fetch below: whether the
-    // configured MCP server is itself loopback, never a remote-supplied URL.
-    const allowLoopback = isLoopbackUrl(normalizedBaseUrl);
-    // Strategy 1: Try RFC 9728 Protected Resource Metadata discovery
-    // This handles cross-domain OAuth (e.g., Todoist: ai.todoist.net/mcp → todoist.com)
-    const resourceMetadata = await discoverProtectedResourceMetadata(normalizedBaseUrl, { signal });
+  throwIfAborted(signal);
+  const normalizedBaseUrl = normalizeUrl(baseUrl);
+  // Trust signal for every authorization-server fetch below: whether the
+  // configured MCP server is itself loopback, never a remote-supplied URL.
+  const allowLoopback = isLoopbackUrl(normalizedBaseUrl);
+  // Strategy 1: Try RFC 9728 Protected Resource Metadata discovery
+  // This handles cross-domain OAuth (e.g., Todoist: ai.todoist.net/mcp → todoist.com)
+  const resourceMetadata = await discoverProtectedResourceMetadata(normalizedBaseUrl, { signal });
 
-    if (resourceMetadata && resourceMetadata.authorization_servers.length > 0) {
-      // Found protected resource metadata with authorization servers
-      // Discover the authorization server's metadata (RFC 8414)
-      const authServerUrl = resourceMetadata.authorization_servers[0];
-      if (!authServerUrl) {
-        // Array has length > 0 but first element is undefined/null - skip this path
-        return { supportsDcr: false };
-      }
-      const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource, signal);
-      if (capabilities) {
-        return capabilities;
-      }
-
-      const issuer = await discoverAuthorizationServerIssuer(baseUrl, { signal });
-      if (issuer) {
-        const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource, signal);
-        if (issuerCapabilities) return issuerCapabilities;
-      }
+  if (resourceMetadata && resourceMetadata.authorization_servers.length > 0) {
+    // Found protected resource metadata with authorization servers
+    // Discover the authorization server's metadata (RFC 8414)
+    const authServerUrl = resourceMetadata.authorization_servers[0];
+    if (!authServerUrl) {
+      // Array has length > 0 but first element is undefined/null - skip this path
+      return { supportsDcr: false };
+    }
+    const capabilities = await resolveCapabilitiesFromAuthorizationServer(authServerUrl, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource, signal);
+    if (capabilities) {
+      return capabilities;
     }
 
-    const issuer = await discoverAuthorizationServerIssuer(normalizedBaseUrl, { signal });
+    const issuer = await discoverAuthorizationServerIssuer(baseUrl, { signal });
     if (issuer) {
-      const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, undefined, allowLoopback, undefined, signal);
+      const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, resourceMetadata.scopes_supported, allowLoopback, resourceMetadata.resource, signal);
       if (issuerCapabilities) return issuerCapabilities;
     }
-
-    // Strategy 2: Fall back to direct RFC 8414 discovery at resource origin
-    // This handles same-domain OAuth (traditional setup)
-    const origin = getOrigin(normalizedBaseUrl);
-    const originCapabilities = await resolveCapabilitiesFromAuthorizationServer(origin, undefined, allowLoopback, undefined, signal);
-    if (originCapabilities) return originCapabilities;
-
-    // No OAuth metadata found
-    return { supportsDcr: false };
-  } catch (_error) {
-    throwIfAborted(signal);
-    // Network error, invalid JSON, or other fetch failure
-    // Gracefully degrade - assume no DCR support
-    return { supportsDcr: false };
   }
+
+  const issuer = await discoverAuthorizationServerIssuer(normalizedBaseUrl, { signal });
+  if (issuer) {
+    const issuerCapabilities = await resolveCapabilitiesFromAuthorizationServer(issuer, undefined, allowLoopback, undefined, signal);
+    if (issuerCapabilities) return issuerCapabilities;
+  }
+
+  // Strategy 2 (speculative: the origin was not advertised): fall back to direct RFC 8414 discovery at resource origin
+  // This handles same-domain OAuth (traditional setup)
+  const origin = getOrigin(normalizedBaseUrl);
+  const originMetadata = await speculativeProbe(signal, () => discoverAuthorizationServerMetadata(origin, { allowLoopback, signal }));
+  if (originMetadata) return buildCapabilities(originMetadata);
+
+  // No OAuth metadata found
+  return { supportsDcr: false };
 }

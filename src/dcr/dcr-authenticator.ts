@@ -170,26 +170,24 @@ export class DcrAuthenticator {
     let tokens = await this.loadTokens(dcrTokenKey, issuer);
 
     if (tokens) {
-      // 2. Verify token is still valid by calling /oauth/verify
-      try {
-        const verifyUrl = `${serverBaseUrl}/oauth/verify`;
-        const verifyResponse = await fetch(verifyUrl, {
-          headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
-          signal,
-        });
+      // 2. Verify token is still valid by calling /oauth/verify. A request that
+      // fails (network, abort) rejects here and leaves the stored token alone;
+      // only the server's answer that the token is invalid deletes it.
+      const verifyUrl = `${serverBaseUrl}/oauth/verify`;
+      const verifyResponse = await fetch(verifyUrl, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
+        signal,
+      });
 
-        if (verifyResponse.ok) {
-          const verifyData = (await verifyResponse.json()) as { token?: string };
-          if (verifyData.token === tokens.accessToken) {
-            // Token is still valid with the self-hosted server
-            return tokens;
-          }
+      if (verifyResponse.ok) {
+        const verifyData = (await verifyResponse.json()) as { token?: string };
+        if (verifyData.token === tokens.accessToken) {
+          // Token is still valid with the self-hosted server
+          return tokens;
         }
-      } catch (_error) {
-        // Token verification failed - need to re-authenticate
       }
 
-      // Token is expired or invalid
+      // The server answered and the token is expired or invalid
       await this.tokenStore.delete(dcrTokenKey);
       tokens = undefined;
     }

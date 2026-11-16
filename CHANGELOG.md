@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.2] - 2026-11-16
+
+### Fixed
+
+- A self-hosted DCR sign-in is no longer deleted when the token verification request fails (network error, abort). The call now rejects and keeps the stored token; the token is deleted only when the server answers that it is invalid.
+- `probeAuthCapabilities()` no longer reports "no DCR" (so the client connects without authentication) when a location the server itself advertised cannot be used: a `resource_metadata` URL from `WWW-Authenticate`, an authorization server named by the resource metadata, or an issuer from the header. A `resource_metadata` URL answering a non-OK status (404, 500) now rejects as well. A network failure, a refusal by the SSRF guard, invalid JSON or an oversize response there now rejects. Guessed well-known locations (and the unprompted request to the server URL) that fail, return HTML, redirect or are refused still mean "not offered", so servers without authentication keep connecting.
+- Building the capability index for search (`buildCapabilityIndex()`, `search()`, and spawned-server capability search) now rejects when a server's `listTools`, `listPrompts` or `listResources` fails. Only a JSON-RPC `MethodNotFound` answer is treated as "the server has none".
+
 ## [2.4.1] - 2026-10-12
 
 ### Fixed

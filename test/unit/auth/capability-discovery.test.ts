@@ -5,6 +5,7 @@
 
 import '../../lib/env-loader.ts';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { probeAuthCapabilities } from '@mcp-z/client';
 import assert from 'assert';
 import getPort from 'get-port';
@@ -109,19 +110,134 @@ describe('unit/auth/capability-discovery', () => {
     assert.deepStrictEqual(capabilities.scopes, ['read', 'write']);
   });
 
-  it('should return supportsDcr=false on network error', async () => {
+  async function withHttpServer(handler: http.RequestListener, run: (base: string) => Promise<void>): Promise<void> {
+    const server = http.createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+
+  it('should return supportsDcr=false on network error (nothing advertised)', async () => {
     const capabilities = await probeAuthCapabilities('http://localhost:8888');
 
-    assert.strictEqual(capabilities.supportsDcr, false);
-    assert.strictEqual(capabilities.registrationEndpoint, undefined);
-    assert.strictEqual(capabilities.authorizationEndpoint, undefined);
-    assert.strictEqual(capabilities.tokenEndpoint, undefined);
+    assert.deepStrictEqual(capabilities, { supportsDcr: false });
   });
 
   it('should return supportsDcr=false on invalid URL', async () => {
-    const capabilities = await probeAuthCapabilities('not-a-url');
+    assert.deepStrictEqual(await probeAuthCapabilities('not-a-url'), { supportsDcr: false });
+  });
 
-    assert.strictEqual(capabilities.supportsDcr, false);
+  it('should return supportsDcr=false when the server offers no OAuth metadata (404 everywhere)', async () => {
+    await withHttpServer(
+      (_req, res) => {
+        res.writeHead(404).end();
+      },
+      async (base) => {
+        assert.deepStrictEqual(await probeAuthCapabilities(`${base}/mcp`), { supportsDcr: false });
+      }
+    );
+  });
+
+  it('should return supportsDcr=false for an auth-less server that answers 200 HTML everywhere', async () => {
+    await withHttpServer(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/html' }).end('<html><body>app</body></html>');
+      },
+      async (base) => {
+        assert.deepStrictEqual(await probeAuthCapabilities(`${base}/mcp`), { supportsDcr: false });
+      }
+    );
+  });
+
+  it('should return supportsDcr=false for an auth-less server that redirects well-known paths to a login page', async () => {
+    await withHttpServer(
+      (req, res) => {
+        if (req.url === '/login') res.writeHead(200, { 'content-type': 'text/html' }).end('<html>login</html>');
+        else res.writeHead(302, { location: '/login' }).end();
+      },
+      async (base) => {
+        assert.deepStrictEqual(await probeAuthCapabilities(`${base}/mcp`), { supportsDcr: false });
+      }
+    );
+  });
+
+  it('should return supportsDcr=false for an auth-less server whose paths redirect in a loop', async () => {
+    await withHttpServer(
+      (req, res) => {
+        res.writeHead(302, { location: req.url ?? '/' }).end();
+      },
+      async (base) => {
+        assert.deepStrictEqual(await probeAuthCapabilities(`${base}/mcp`), { supportsDcr: false });
+      }
+    );
+  });
+
+  it('should return supportsDcr=false when the origin authorization-server probe returns invalid JSON (nothing advertised)', async () => {
+    await withHttpServer(
+      (req, res) => {
+        if (req.url?.includes('oauth-authorization-server')) res.writeHead(200, { 'content-type': 'application/json' }).end('{broken');
+        else res.writeHead(404).end();
+      },
+      async (base) => {
+        assert.deepStrictEqual(await probeAuthCapabilities(`${base}/mcp`), { supportsDcr: false });
+      }
+    );
+  });
+
+  // Locations the server advertised are not guesses: failures there reach the caller.
+  describe('advertised locations (strict)', () => {
+    it('should reject when resource_metadata points at a refused address (SSRF) instead of connecting without auth', async () => {
+      await withHttpServer(
+        (_req, res) => {
+          res.writeHead(401, { 'www-authenticate': 'Bearer resource_metadata="http://10.0.0.1/meta"' }).end();
+        },
+        async (base) => {
+          await assert.rejects(probeAuthCapabilities(`${base}/mcp`), /Refusing to fetch/);
+        }
+      );
+    });
+
+    it('should reject when the authorization server named by the resource metadata returns invalid JSON', async () => {
+      await withHttpServer(
+        (req, res) => {
+          const origin = `http://${req.headers.host}`;
+          if (req.url?.startsWith('/.well-known/oauth-protected-resource')) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resource: origin, authorization_servers: [origin] }));
+          else if (req.url?.includes('oauth-authorization-server')) res.writeHead(200, { 'content-type': 'text/html' }).end('<html>');
+          else res.writeHead(404).end();
+        },
+        async (base) => {
+          await assert.rejects(probeAuthCapabilities(base), /invalid JSON/);
+        }
+      );
+    });
+
+    it('should reject when the authorization server named by the resource metadata is unreachable', async () => {
+      await withHttpServer(
+        (req, res) => {
+          if (req.url?.startsWith('/.well-known/oauth-protected-resource')) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resource: `http://${req.headers.host}`, authorization_servers: ['http://127.0.0.1:1'] }));
+          else res.writeHead(404).end();
+        },
+        async (base) => {
+          await assert.rejects(probeAuthCapabilities(base), /Failed to fetch/);
+        }
+      );
+    });
+
+    it('should reject when the issuer advertised in WWW-Authenticate returns invalid JSON', async () => {
+      await withHttpServer(
+        (req, res) => {
+          if (req.url?.includes('oauth-authorization-server')) res.writeHead(200, { 'content-type': 'text/html' }).end('<html>');
+          else res.writeHead(401, { 'www-authenticate': `Bearer authorization_server="http://${req.headers.host}"` }).end();
+        },
+        async (base) => {
+          await assert.rejects(probeAuthCapabilities(`${base}/mcp`), /invalid JSON/);
+        }
+      );
+    });
   });
 
   describe('MCP endpoint path handling (BUG FIX)', () => {

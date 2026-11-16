@@ -5,7 +5,7 @@
  * from connected MCP servers.
  */
 
-import type { Client } from '@modelcontextprotocol/client';
+import { type Client, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/client';
 import type { PromptArgument } from '../connection/types.ts';
 import type { CapabilityIndex, CapabilityType, IndexedCapability, IndexedPrompt, IndexedResource, IndexedTool, SearchField, SearchOptions, SearchResponse, SearchResult } from './types.ts';
 
@@ -68,6 +68,12 @@ function extractArgumentsText(args: PromptArgument[] | undefined): string {
     .join(' ');
 }
 
+/** Treat a JSON-RPC MethodNotFound answer as "none"; every other failure reaches the caller. */
+function tolerateMethodNotFound(error: unknown): null {
+  if (error instanceof ProtocolError && error.code === ProtocolErrorCode.MethodNotFound) return null;
+  throw error;
+}
+
 /**
  * Build an index of capabilities from connected MCP clients
  */
@@ -78,8 +84,8 @@ export async function buildCapabilityIndex(clients: Map<string, CapabilityClient
   for (const [serverName, client] of clients) {
     servers.push(serverName);
 
-    // Fetch all capabilities in parallel, handling errors gracefully
-    const [toolsResult, promptsResult, resourcesResult] = await Promise.all([client.listTools().catch(() => null), client.listPrompts().catch(() => null), client.listResources().catch(() => null)]);
+    // Fetch all capabilities in parallel; a server that does not implement a list method (MethodNotFound) simply has none of that kind
+    const [toolsResult, promptsResult, resourcesResult] = await Promise.all([client.listTools().catch(tolerateMethodNotFound), client.listPrompts().catch(tolerateMethodNotFound), client.listResources().catch(tolerateMethodNotFound)]);
 
     // Index tools
     if (toolsResult?.tools) {

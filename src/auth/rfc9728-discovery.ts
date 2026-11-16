@@ -4,7 +4,7 @@
  */
 
 import { joinWellKnown, normalizeUrl } from '../lib/url-utils.ts';
-import { discoveryFetch, isLoopbackUrl, readDiscoveryJson, throwIfAborted } from './discovery-fetch.ts';
+import { DiscoveryFetchError, discoveryFetch, isLoopbackUrl, readDiscoveryJson, speculativeProbe, throwIfAborted } from './discovery-fetch.ts';
 import type { AuthorizationServerMetadata, ProtectedResourceMetadata } from './types.ts';
 
 /** Returns `url`'s origin (protocol + host), or the original string if it doesn't parse. */
@@ -35,186 +35,102 @@ function getPath(url: string): string {
  */
 export async function discoverProtectedResourceMetadata(resourceUrl: string, options: { signal?: AbortSignal } = {}): Promise<ProtectedResourceMetadata | null> {
   const { signal } = options;
-  try {
-    throwIfAborted(signal);
-    const normalizedResourceUrl = normalizeUrl(resourceUrl);
-    // resourceUrl is the server the caller configured (never remote-supplied);
-    // its loopback-ness is the trust signal every fetch below relies on.
-    const allowLoopback = isLoopbackUrl(normalizedResourceUrl);
-    const headerMetadata = await discoverProtectedResourceMetadataFromHeader(normalizedResourceUrl, allowLoopback, signal);
-    if (headerMetadata) return headerMetadata;
+  throwIfAborted(signal);
+  const normalizedResourceUrl = normalizeUrl(resourceUrl);
+  // resourceUrl is the server the caller configured (never remote-supplied);
+  // its loopback-ness is the trust signal every fetch below relies on.
+  const allowLoopback = isLoopbackUrl(normalizedResourceUrl);
+  const headerMetadata = await discoverProtectedResourceMetadataFromHeader(normalizedResourceUrl, allowLoopback, signal);
+  if (headerMetadata) return headerMetadata;
 
-    // Strategy 0: Try path-local well-known (supports path-prefixed deployments like /outlook)
-    const localWellKnownUrl = joinWellKnown(normalizedResourceUrl, '/.well-known/oauth-protected-resource');
-    try {
-      const response = await discoveryFetch(
-        localWellKnownUrl,
-        {
-          method: 'GET',
-          headers: { Accept: 'application/json', Connection: 'close' },
-          signal,
-        },
-        'protected resource metadata (path-local)',
-        { allowLoopback }
-      );
-      if (response.ok) {
-        return await readDiscoveryJson<ProtectedResourceMetadata>(response, 'protected resource metadata (path-local)');
-      }
-    } catch {
-      throwIfAborted(signal);
-      // Continue to origin-based discovery
+  // These well-known locations are guesses, not something the server advertised:
+  // a failure or a non-2xx answer means "not offered", so try the next one.
+  const fetchMetadata = (url: string, context: string): Promise<ProtectedResourceMetadata | null> =>
+    speculativeProbe(signal, async () => {
+      const response = await discoveryFetch(url, { method: 'GET', headers: { Accept: 'application/json', Connection: 'close' }, signal }, context, { allowLoopback });
+      if (!response.ok) return null;
+      return readDiscoveryJson<ProtectedResourceMetadata>(response, context);
+    });
+
+  // Strategy 0: Try path-local well-known (supports path-prefixed deployments like /outlook)
+  const localMetadata = await fetchMetadata(joinWellKnown(normalizedResourceUrl, '/.well-known/oauth-protected-resource'), 'protected resource metadata (path-local)');
+  if (localMetadata) return localMetadata;
+
+  const origin = getOrigin(normalizedResourceUrl);
+  const path = getPath(normalizedResourceUrl);
+  const subPathUrl = `${origin}/.well-known/oauth-protected-resource${path}`;
+
+  // Strategy 1: Try root location (REQUIRED by RFC 9728)
+  const rootMetadata = await fetchMetadata(`${origin}/.well-known/oauth-protected-resource`, 'protected resource metadata (root)');
+  if (rootMetadata) {
+    // Check if the discovered resource matches what we're looking for
+    if (rootMetadata.resource === normalizedResourceUrl) return rootMetadata;
+    // If there's no path component, return root metadata
+    if (!path) return rootMetadata;
+    // Root metadata applies to sub-paths; prefer more specific sub-path metadata when it exists
+    if (normalizedResourceUrl.startsWith(rootMetadata.resource)) {
+      const specific = await fetchMetadata(subPathUrl, 'protected resource metadata (sub-path)');
+      return specific ?? rootMetadata;
     }
-
-    const origin = getOrigin(normalizedResourceUrl);
-    const path = getPath(normalizedResourceUrl);
-
-    // Strategy 1: Try root location (REQUIRED by RFC 9728)
-    const rootUrl = `${origin}/.well-known/oauth-protected-resource`;
-
-    try {
-      const response = await discoveryFetch(
-        rootUrl,
-        {
-          method: 'GET',
-          headers: { Accept: 'application/json', Connection: 'close' },
-          signal,
-        },
-        'protected resource metadata (root)',
-        { allowLoopback }
-      );
-
-      if (response.ok) {
-        const metadata = await readDiscoveryJson<ProtectedResourceMetadata>(response, 'protected resource metadata (root)');
-        // Check if the discovered resource matches what we're looking for
-        if (metadata.resource === normalizedResourceUrl) {
-          return metadata;
-        }
-        // If there's no path component, return root metadata
-        // (e.g., looking for http://example.com and found it)
-        if (!path) {
-          return metadata;
-        }
-        // If requested URL starts with metadata.resource, the root metadata applies to sub-paths
-        // (e.g., looking for http://example.com/api/v1/mcp, found http://example.com)
-        if (normalizedResourceUrl.startsWith(metadata.resource)) {
-          // Still try sub-path location to see if there's more specific metadata
-          // But save root metadata as fallback
-          const rootMetadata = metadata;
-
-          // Try sub-path location for more specific metadata
-          const subPathUrl = `${origin}/.well-known/oauth-protected-resource${path}`;
-          try {
-            const subPathResponse = await discoveryFetch(
-              subPathUrl,
-              {
-                method: 'GET',
-                headers: { Accept: 'application/json', Connection: 'close' },
-                signal,
-              },
-              'protected resource metadata (sub-path)',
-              { allowLoopback }
-            );
-            if (subPathResponse.ok) {
-              return await readDiscoveryJson<ProtectedResourceMetadata>(subPathResponse, 'protected resource metadata (sub-path)');
-            }
-          } catch {
-            throwIfAborted(signal);
-            // Sub-path failed, use root metadata
-          }
-
-          // Return root metadata as it applies to this resource
-          return rootMetadata;
-        }
-        // Otherwise, try sub-path location before giving up
-      }
-    } catch {
-      throwIfAborted(signal);
-      // Continue to sub-path location
-    }
-
-    // Strategy 2: Try sub-path location (MCP spec extension)
-    // Only try if there's a path component
-    if (path) {
-      const subPathUrl = `${origin}/.well-known/oauth-protected-resource${path}`;
-
-      try {
-        const response = await discoveryFetch(
-          subPathUrl,
-          {
-            method: 'GET',
-            headers: { Accept: 'application/json', Connection: 'close' },
-            signal,
-          },
-          'protected resource metadata (sub-path)',
-          { allowLoopback }
-        );
-
-        if (response.ok) {
-          return await readDiscoveryJson<ProtectedResourceMetadata>(response, 'protected resource metadata (sub-path)');
-        }
-      } catch {
-        throwIfAborted(signal);
-        // Fall through to return null
-      }
-    }
-
-    // Neither location found or resource didn't match
-    return null;
-  } catch (_error) {
-    throwIfAborted(signal);
-    // Network error, invalid URL, or other failure
-    return null;
+    // Otherwise, try sub-path location before giving up
   }
+
+  // Strategy 2: Try sub-path location (MCP spec extension), only with a path component
+  if (path) {
+    const subPathMetadata = await fetchMetadata(subPathUrl, 'protected resource metadata (sub-path)');
+    if (subPathMetadata) return subPathMetadata;
+  }
+
+  // Neither location found or resource didn't match
+  return null;
 }
 
 async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, allowLoopback: boolean, signal?: AbortSignal): Promise<ProtectedResourceMetadata | null> {
-  try {
-    throwIfAborted(signal);
+  throwIfAborted(signal);
+  // The unprompted fetch of the resource URL is speculative: nothing has been advertised yet.
+  const header = await speculativeProbe(signal, async () => {
     const response = await fetch(resourceUrl, {
       method: 'GET',
       headers: { Accept: 'application/json', Connection: 'close' },
       signal,
     });
 
-    let header = response.headers.get('www-authenticate');
-    if (!header) {
-      const postResponse = await fetch(resourceUrl, {
-        method: 'POST',
-        headers: { Accept: 'application/json', Connection: 'close', 'Content-Type': 'application/json' },
-        body: '{}',
-        signal,
-      });
-      header = postResponse.headers.get('www-authenticate');
-    }
+    const first = response.headers.get('www-authenticate');
+    if (first) return first;
+    const postResponse = await fetch(resourceUrl, {
+      method: 'POST',
+      headers: { Accept: 'application/json', Connection: 'close', 'Content-Type': 'application/json' },
+      body: '{}',
+      signal,
+    });
+    return postResponse.headers.get('www-authenticate');
+  });
 
-    if (!header) return null;
+  if (!header) return null;
 
-    const match = header.match(/resource_metadata="([^"]+)"/i);
-    if (!match || !match[1]) return null;
+  const match = header.match(/resource_metadata="([^"]+)"/i);
+  if (!match || !match[1]) return null;
 
-    // metadataUrl is remote-server-chosen (the primary SSRF vector here);
-    // allowLoopback reflects trust in resourceUrl, not in metadataUrl.
-    const metadataUrl = match[1];
-    const metadataResponse = await discoveryFetch(
-      metadataUrl,
-      {
-        method: 'GET',
-        headers: { Accept: 'application/json', Connection: 'close' },
-        signal,
-      },
-      'resource_metadata URL',
-      { allowLoopback }
-    );
+  // From here the location was advertised by the server, so failures reject.
+  // metadataUrl is remote-server-chosen (the primary SSRF vector here);
+  // allowLoopback reflects trust in resourceUrl, not in metadataUrl.
+  const metadataUrl = match[1];
+  const metadataResponse = await discoveryFetch(
+    metadataUrl,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+      signal,
+    },
+    'resource_metadata URL',
+    { allowLoopback }
+  );
 
-    if (!metadataResponse.ok) {
-      return null;
-    }
-
-    return await readDiscoveryJson<ProtectedResourceMetadata>(metadataResponse, 'resource_metadata URL');
-  } catch (_error) {
-    throwIfAborted(signal);
-    return null;
+  if (!metadataResponse.ok) {
+    throw new DiscoveryFetchError(`resource_metadata URL returned HTTP ${metadataResponse.status}`);
   }
+
+  return await readDiscoveryJson<ProtectedResourceMetadata>(metadataResponse, 'resource_metadata URL');
 }
 
 /**
@@ -227,48 +143,43 @@ async function discoverProtectedResourceMetadataFromHeader(resourceUrl: string, 
  */
 export async function discoverAuthorizationServerMetadata(authServerUrl: string, options: { allowLoopback?: boolean; signal?: AbortSignal } = {}): Promise<AuthorizationServerMetadata | null> {
   const { allowLoopback = false, signal } = options;
-  try {
-    throwIfAborted(signal);
-    const normalizedAuthServerUrl = normalizeUrl(authServerUrl);
-    const localWellKnownUrl = joinWellKnown(normalizedAuthServerUrl, '/.well-known/oauth-authorization-server');
-    const localResponse = await discoveryFetch(
-      localWellKnownUrl,
-      {
-        method: 'GET',
-        headers: { Accept: 'application/json', Connection: 'close' },
-        signal,
-      },
-      'authorization server metadata (path-local)',
-      { allowLoopback }
-    );
+  throwIfAborted(signal);
+  const normalizedAuthServerUrl = normalizeUrl(authServerUrl);
+  const localWellKnownUrl = joinWellKnown(normalizedAuthServerUrl, '/.well-known/oauth-authorization-server');
+  const localResponse = await discoveryFetch(
+    localWellKnownUrl,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+      signal,
+    },
+    'authorization server metadata (path-local)',
+    { allowLoopback }
+  );
 
-    if (localResponse.ok) {
-      return await readDiscoveryJson<AuthorizationServerMetadata>(localResponse, 'authorization server metadata (path-local)');
-    }
+  if (localResponse.ok) {
+    return await readDiscoveryJson<AuthorizationServerMetadata>(localResponse, 'authorization server metadata (path-local)');
+  }
 
-    const origin = getOrigin(normalizedAuthServerUrl);
-    const wellKnownUrl = `${origin}/.well-known/oauth-authorization-server`;
+  const origin = getOrigin(normalizedAuthServerUrl);
+  const wellKnownUrl = `${origin}/.well-known/oauth-authorization-server`;
 
-    const response = await discoveryFetch(
-      wellKnownUrl,
-      {
-        method: 'GET',
-        headers: { Accept: 'application/json', Connection: 'close' },
-        signal,
-      },
-      'authorization server metadata',
-      { allowLoopback }
-    );
+  const response = await discoveryFetch(
+    wellKnownUrl,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json', Connection: 'close' },
+      signal,
+    },
+    'authorization server metadata',
+    { allowLoopback }
+  );
 
-    if (!response.ok) {
-      return null;
-    }
-
-    return await readDiscoveryJson<AuthorizationServerMetadata>(response, 'authorization server metadata');
-  } catch (_error) {
-    throwIfAborted(signal);
+  if (!response.ok) {
     return null;
   }
+
+  return await readDiscoveryJson<AuthorizationServerMetadata>(response, 'authorization server metadata');
 }
 
 /**
@@ -279,23 +190,20 @@ export async function discoverAuthorizationServerMetadata(authServerUrl: string,
  */
 export async function discoverAuthorizationServerIssuer(resourceUrl: string, options: { signal?: AbortSignal } = {}): Promise<string | null> {
   const { signal } = options;
-  try {
-    throwIfAborted(signal);
+  throwIfAborted(signal);
+  // Fetching the resource URL unprompted is speculative; only a header it returns is advertised.
+  const header = await speculativeProbe(signal, async () => {
     const response = await fetch(resourceUrl, {
       method: 'GET',
       headers: { Accept: 'application/json', Connection: 'close' },
       signal,
     });
+    return response.headers.get('www-authenticate');
+  });
+  if (!header) return null;
 
-    const header = response.headers.get('www-authenticate');
-    if (!header) return null;
+  const match = header.match(/(?:authorization_server|issuer)="([^"]+)"/i);
+  if (!match) return null;
 
-    const match = header.match(/(?:authorization_server|issuer)="([^"]+)"/i);
-    if (!match) return null;
-
-    return match[1] ?? null;
-  } catch (_error) {
-    throwIfAborted(signal);
-    return null;
-  }
+  return match[1] ?? null;
 }
