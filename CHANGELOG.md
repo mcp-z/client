@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0]
+
+### Changed
+
+- Sign-ins saved by an earlier version in the default store (`.mcp-z/tokens.json`) are moved to the new storage format once, on first use, so users stay signed in. A store you pass in is left alone.
+- A custom `tokenStore` passed to `DcrAuthenticator` is a keyv 6 `Keyv`. `deleteTokens()` lists the store's keys to find a server's tokens; for a store that cannot list its keys it deletes nothing instead of throwing.
+
 ## [2.4.2] - 2026-11-16
 
 ### Fixed

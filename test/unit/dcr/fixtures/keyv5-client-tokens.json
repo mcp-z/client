@@ -1,0 +1,7 @@
+{
+  "cache": [
+    ["keyv:dcr-tokens:https://dummy.example/mcp", { "value": "{\"value\":{\"accessToken\":\"dummy_access\",\"refreshToken\":\"dummy_refresh\",\"issuer\":\"https://issuer.example\"}}" }],
+    ["keyv:tokens:https://other.example/mcp", { "value": "{\"value\":{\"accessToken\":\"other_access\",\"issuer\":\"https://issuer.example\"}}" }]
+  ],
+  "lastExpire": 1794891654786
+}

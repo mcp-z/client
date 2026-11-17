@@ -315,8 +315,8 @@ export async function connectMcpClient(
       // Try modern Streamable HTTP first (protocol version 2025-03-26)
       // Merge static headers from config with DCR auth headers (DCR Authorization takes precedence)
       const staticHeaders = serverConfig.headers || {};
-      const dcrHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-      const mergedHeaders = { ...staticHeaders, ...dcrHeaders };
+      const dcrHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+      const mergedHeaders: Record<string, string> = { ...staticHeaders, ...dcrHeaders };
 
       const transportOptions =
         Object.keys(mergedHeaders).length > 0
@@ -367,8 +367,8 @@ export async function connectMcpClient(
       // SSE transport with merged headers (static + DCR auth)
       // Reuse the same header merging logic as Streamable HTTP
       const staticHeaders = serverConfig.headers || {};
-      const dcrHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-      const mergedHeaders = { ...staticHeaders, ...dcrHeaders };
+      const dcrHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+      const mergedHeaders: Record<string, string> = { ...staticHeaders, ...dcrHeaders };
 
       const sseTransportOptions =
         Object.keys(mergedHeaders).length > 0

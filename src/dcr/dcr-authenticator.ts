@@ -7,6 +7,7 @@ import path from 'node:path';
 import * as fs from 'fs';
 import Keyv from 'keyv';
 import { KeyvFile } from 'keyv-file';
+import { migrateKeyv5Keys } from 'keyv-registry';
 import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
 import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
@@ -63,6 +64,9 @@ export class DcrAuthenticator {
   private headless: boolean;
   private redirectUri: string;
   private logger: Logger;
+  /** Set only for the default store: sign-ins saved by keyv 5 are moved once before the first store access. */
+  private legacyMigration?: Promise<void>;
+  private legacyKeys = false;
 
   constructor(options: DcrAuthenticatorOptions) {
     if (options.tokenStore) {
@@ -77,12 +81,28 @@ export class DcrAuthenticator {
       this.tokenStore = new Keyv({
         store: new KeyvFile({ filename: storePath }),
       });
+      this.legacyKeys = true;
     }
     this.dcrClient = new DynamicClientRegistrar();
     this.oauthFlow = new InteractiveOAuthFlow();
     this.headless = options.headless || false;
     this.redirectUri = options.redirectUri;
     this.logger = options.logger ?? defaultLogger;
+  }
+
+  /** Moves sign-ins saved by keyv 5 on the default store, once; a failure is not cached so the next call retries. */
+  private async ready(): Promise<void> {
+    if (!this.legacyKeys) return;
+    this.legacyMigration ??= migrateKeyv5Keys(this.tokenStore).then(
+      (moved) => {
+        if (moved > 0) this.logger.debug(`Moved ${moved} saved sign-in entries to the keyv 6 format`);
+      },
+      (error) => {
+        this.legacyMigration = undefined;
+        throw new Error('Moving saved sign-ins to the keyv 6 format failed', { cause: error });
+      }
+    );
+    await this.legacyMigration;
   }
 
   /**
@@ -122,6 +142,7 @@ export class DcrAuthenticator {
    */
   async ensureAuthenticated(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
     throwIfAborted(signal);
+    await this.ready();
     // Auto-detect server mode
     const isSelfHosted = await this.detectSelfHostedMode(mcpServerUrl);
 
@@ -336,15 +357,13 @@ export class DcrAuthenticator {
    * was given - keys are built from the configured URL, never from the discovered
    * RFC 8707 resource, precisely so this can find them without doing discovery.
    *
-   * @throws CredentialBindingError if the configured store cannot enumerate keys.
+   * The token store must support iteration (see the README); a store that cannot list its keys deletes nothing.
    */
   async deleteTokens(mcpServerUrl: string): Promise<void> {
     const suffix = `:${normalizeUrl(mcpServerUrl)}`;
-    if (!this.tokenStore.iterator) {
-      throw new CredentialBindingError('Token store does not support key enumeration, which issuer-keyed credentials require');
-    }
+    await this.ready();
 
-    for await (const [key] of this.tokenStore.iterator(this.tokenStore.namespace)) {
+    for await (const [key] of this.tokenStore.iterator()) {
       if (typeof key === 'string' && (key.startsWith('tokens:') || key.startsWith('dcr-tokens:')) && key.endsWith(suffix)) {
         await this.tokenStore.delete(key);
       }

@@ -188,6 +188,8 @@ const client = await registry.connect('todoist', {
 });
 ```
 
+A custom `tokenStore` must be a keyv 6 `Keyv` whose store can list its keys (memory, file and sqlite can); `deleteTokens()` needs that to find a server's tokens. Sign-ins saved by keyv 5 in the default store are moved to the keyv 6 format on first use.
+
 ## Protocol version negotiation
 
 By default a connect performs the plain 2025 MCP connect sequence. Pass `versionNegotiation` to negotiate the protocol revision instead:

@@ -9,8 +9,11 @@ import type { AddressInfo } from 'node:net';
 import type { AuthCapabilities, TokenSet } from '@mcp-z/client';
 import { DcrAuthenticator } from '@mcp-z/client';
 import assert from 'assert';
+import fs from 'fs';
 import getPort from 'get-port';
 import Keyv from 'keyv';
+import { KeyvFile } from 'keyv-file';
+import path from 'path';
 
 describe('unit/auth/dcr-authenticator', () => {
   it('should use custom token store when provided', () => {
@@ -267,6 +270,83 @@ describe('unit/auth/dcr-authenticator', () => {
     await assert.rejects(authenticator.ensureAuthenticated('https://public.example.com/mcp', maliciousCapabilities), (error: Error) => {
       assert.ok(error.message.includes('trusted loopback origin'), error.message);
       return true;
+    });
+  });
+  describe('default store written by keyv 5', () => {
+    const storeFile = () => path.join(workDir, '.mcp-z', 'tokens.json');
+    const debugLogger = (messages: string[]) => ({ debug: (m: string) => messages.push(m), info() {}, warn() {}, error() {} }) as unknown as import('@mcp-z/client').Logger;
+
+    const fixture = path.resolve('test/unit/dcr/fixtures/keyv5-client-tokens.json');
+    const originalCwd = process.cwd();
+    let workDir: string;
+
+    beforeEach(() => {
+      fs.mkdirSync(path.resolve('.tmp'), { recursive: true });
+      workDir = fs.mkdtempSync(path.join(path.resolve('.tmp'), 'keyv5-'));
+      fs.mkdirSync(path.join(workDir, '.mcp-z'), { recursive: true });
+      fs.copyFileSync(fixture, path.join(workDir, '.mcp-z', 'tokens.json'));
+      process.chdir(workDir);
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      fs.rmSync(workDir, { recursive: true, force: true });
+    });
+
+    it('moves saved sign-ins to keyv 6 keys, so deleteTokens finds the old token', async () => {
+      const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback' });
+      await authenticator.deleteTokens('https://dummy.example/mcp');
+
+      const reader = new Keyv({ store: new KeyvFile({ filename: path.join(workDir, '.mcp-z', 'tokens.json') }) });
+      assert.strictEqual(await reader.get('dcr-tokens:https://dummy.example/mcp'), undefined, 'deleted by deleteTokens');
+      const kept = (await reader.get('tokens:https://other.example/mcp')) as TokenSet | undefined;
+      assert.strictEqual(kept?.accessToken, 'other_access', 'untouched entry readable under its keyv 6 key');
+    });
+    it('migrates through ensureAuthenticated before discovery fails', async () => {
+      const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback', headless: true });
+      const capabilities: AuthCapabilities = {
+        supportsDcr: true,
+        issuer: 'http://localhost:9998',
+        registrationEndpoint: 'http://localhost:9998/oauth/register',
+        authorizationEndpoint: 'http://localhost:9998/oauth/authorize',
+        tokenEndpoint: 'http://localhost:9998/oauth/token',
+      } as AuthCapabilities;
+      await assert.rejects(authenticator.ensureAuthenticated('http://127.0.0.1:9/mcp', capabilities));
+
+      const keys = (JSON.parse(fs.readFileSync(storeFile(), 'utf8')).cache as [string, unknown][]).map(([key]) => key);
+      assert.ok(keys.includes('dcr-tokens:https://dummy.example/mcp'), keys.join());
+      assert.ok(!keys.some((key) => key.startsWith('keyv:')), keys.join());
+    });
+
+    it('migrates once when three first calls run concurrently', async () => {
+      const messages: string[] = [];
+      const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback', logger: debugLogger(messages) });
+      await Promise.all([authenticator.deleteTokens('https://x.example/mcp'), authenticator.deleteTokens('https://y.example/mcp'), authenticator.deleteTokens('https://z.example/mcp')]);
+
+      assert.strictEqual(messages.filter((m) => m.startsWith('Moved ')).length, 1, messages.join('\n'));
+    });
+
+    it('retries a failed migration on the next call and names the migration in the error', async () => {
+      const messages: string[] = [];
+      const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback', logger: debugLogger(messages) });
+      const store = (authenticator as unknown as { tokenStore: Keyv }).tokenStore;
+      const realIterator = store.iterator.bind(store);
+      let calls = 0;
+      store.iterator = ((...args: Parameters<typeof realIterator>) => {
+        if (++calls === 1) throw new Error('iterator failed');
+        return realIterator(...args);
+      }) as typeof store.iterator;
+
+      await assert.rejects(authenticator.deleteTokens('https://dummy.example/mcp'), (error: Error) => {
+        assert.ok(error.message.includes('saved sign-ins'), error.message);
+        assert.strictEqual((error.cause as Error).message, 'iterator failed');
+        return true;
+      });
+      await authenticator.deleteTokens('https://dummy.example/mcp');
+      assert.ok(
+        messages.some((m) => m.startsWith('Moved ')),
+        'second call migrated'
+      );
     });
   });
 });
