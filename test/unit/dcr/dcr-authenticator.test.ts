@@ -377,7 +377,7 @@ describe('unit/auth/dcr-authenticator', () => {
 
     afterEach(() => {
       process.chdir(originalCwd);
-      fs.rmSync(workDir, { recursive: true, force: true });
+      safeRmSync(workDir, { recursive: true, force: true });
     });
 
     it('moves saved sign-ins to keyv 6 keys, so deleteTokens finds the old token', async () => {

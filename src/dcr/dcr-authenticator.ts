@@ -10,6 +10,7 @@ import createStore, { migrateKeyv5Keys } from 'keyv-registry';
 import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
 import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
+import { DEFAULT_STORE_DIR, DEFAULT_STORE_FILE, SHARED_FILE_PROTOCOL } from '../constants.ts';
 import { extractBaseUrl, normalizeUrl } from '../lib/url-utils.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { DynamicClientRegistrar } from './dynamic-client-registrar.ts';
@@ -71,7 +72,7 @@ export class DcrAuthenticator {
     if (options.tokenStore) {
       this.tokenStore = options.tokenStore;
     } else {
-      this.defaultStorePath = path.join(process.cwd(), '.mcp-z', 'tokens.json');
+      this.defaultStorePath = path.join(process.cwd(), DEFAULT_STORE_DIR, DEFAULT_STORE_FILE);
     }
     this.dcrClient = new DynamicClientRegistrar();
     this.oauthFlow = new InteractiveOAuthFlow();
@@ -95,7 +96,7 @@ export class DcrAuthenticator {
   }
 
   private async openDefaultStore(storePath: string): Promise<void> {
-    this.tokenStore = await createStore(pathToFileURL(storePath).href.replace(/^file:/, 'file+shared:'));
+    this.tokenStore = await createStore(pathToFileURL(storePath).href.replace(/^file:/, SHARED_FILE_PROTOCOL));
     try {
       const moved = await migrateKeyv5Keys(this.tokenStore);
       if (moved > 0) this.logger.debug(`Moved ${moved} saved sign-in entries to the keyv 6 format`);
