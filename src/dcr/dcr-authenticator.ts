@@ -4,10 +4,9 @@
  */
 
 import path from 'node:path';
-import * as fs from 'fs';
-import Keyv from 'keyv';
-import { KeyvFile } from 'keyv-file';
-import { migrateKeyv5Keys } from 'keyv-registry';
+import { pathToFileURL } from 'node:url';
+import type Keyv from 'keyv';
+import createStore, { migrateKeyv5Keys } from 'keyv-registry';
 import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
 import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
 import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
@@ -19,7 +18,7 @@ import { DynamicClientRegistrar } from './dynamic-client-registrar.ts';
  * DcrAuthenticator configuration options
  */
 export interface DcrAuthenticatorOptions {
-  /** Custom Keyv store (for testing) - if not provided, uses default ~/.mcpeasy/tokens.json */
+  /** Custom Keyv store (for testing) - if not provided, uses the shared default <cwd>/.mcp-z/tokens.json */
   tokenStore?: Keyv;
   /** Headless mode (don't open browser) */
   headless?: boolean;
@@ -58,30 +57,21 @@ function requireIssuer(capabilities: AuthCapabilities): string {
  * Handles DCR registration, OAuth flows, and token management
  */
 export class DcrAuthenticator {
-  private tokenStore: Keyv;
+  private tokenStore!: Keyv;
   private dcrClient: DynamicClientRegistrar;
   private oauthFlow: InteractiveOAuthFlow;
   private headless: boolean;
   private redirectUri: string;
   private logger: Logger;
-  /** Set only for the default store: sign-ins saved by keyv 5 are moved once before the first store access. */
-  private legacyMigration?: Promise<void>;
-  private legacyKeys = false;
+  /** Set only for the default store: its path, opened on first use. */
+  private defaultStorePath?: string;
+  private defaultStoreReady?: Promise<void>;
 
   constructor(options: DcrAuthenticatorOptions) {
     if (options.tokenStore) {
       this.tokenStore = options.tokenStore;
     } else {
-      // Default CLI store in .mcp-z directory (per-project)
-      const storePath = path.join(process.cwd(), '.mcp-z', 'tokens.json');
-
-      // Ensure directory exists before creating store
-      fs.mkdirSync(path.dirname(storePath), { recursive: true });
-
-      this.tokenStore = new Keyv({
-        store: new KeyvFile({ filename: storePath }),
-      });
-      this.legacyKeys = true;
+      this.defaultStorePath = path.join(process.cwd(), '.mcp-z', 'tokens.json');
     }
     this.dcrClient = new DynamicClientRegistrar();
     this.oauthFlow = new InteractiveOAuthFlow();
@@ -90,19 +80,28 @@ export class DcrAuthenticator {
     this.logger = options.logger ?? defaultLogger;
   }
 
-  /** Moves sign-ins saved by keyv 5 on the default store, once; a failure is not cached so the next call retries. */
+  /**
+   * Opens the default store, shared with other processes through a locked file, and moves sign-ins saved by keyv 5 once.
+   * A failure is not cached, so the next call retries.
+   */
   private async ready(): Promise<void> {
-    if (!this.legacyKeys) return;
-    this.legacyMigration ??= migrateKeyv5Keys(this.tokenStore).then(
-      (moved) => {
-        if (moved > 0) this.logger.debug(`Moved ${moved} saved sign-in entries to the keyv 6 format`);
-      },
-      (error) => {
-        this.legacyMigration = undefined;
-        throw new Error('Moving saved sign-ins to the keyv 6 format failed', { cause: error });
-      }
-    );
-    await this.legacyMigration;
+    const storePath = this.defaultStorePath;
+    if (!storePath) return;
+    this.defaultStoreReady ??= this.openDefaultStore(storePath).catch((error) => {
+      this.defaultStoreReady = undefined;
+      throw error;
+    });
+    await this.defaultStoreReady;
+  }
+
+  private async openDefaultStore(storePath: string): Promise<void> {
+    this.tokenStore = await createStore(pathToFileURL(storePath).href.replace(/^file:/, 'file+shared:'));
+    try {
+      const moved = await migrateKeyv5Keys(this.tokenStore);
+      if (moved > 0) this.logger.debug(`Moved ${moved} saved sign-in entries to the keyv 6 format`);
+    } catch (error) {
+      throw new Error('Moving saved sign-ins to the keyv 6 format failed', { cause: error });
+    }
   }
 
   /**

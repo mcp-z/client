@@ -60,6 +60,7 @@
     "version": "tsds version"
   },
   "dependencies": {
+    "@keyv/serialize": "^1.1.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
@@ -67,9 +68,10 @@
     "get-port": "5.1.1",
     "ipaddr.js": "^2.5.0",
     "keyv": "^6.1.0",
-    "keyv-file": "5.3.3",
-    "keyv-registry": "^3.0.0",
-    "module-root-sync": "^2.0.0"
+    "keyv-registry": "^3.1.0",
+    "module-root-sync": "^2.0.0",
+    "proper-lockfile": "^4.1.2",
+    "temp-suffix": "^1.0.12"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -81,6 +83,7 @@
     "express": "^5.0.0",
     "fs-remove-compat": "^1.1.1",
     "json-schema-to-typescript": "^16.0.0",
+    "keyv-file": "5.3.3",
     "node-version-use": "^2.4.7",
     "portable-env": "^1.4.0",
     "ts-dev-stack": "^1.22.1",
