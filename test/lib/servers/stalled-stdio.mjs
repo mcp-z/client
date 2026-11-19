@@ -4,3 +4,4 @@ process.stdin.on('end', () => {});
 process.on('SIGINT', () => {});
 process.on('SIGTERM', () => {});
 setInterval(() => {}, 1000);
+process.stderr.write('STALLED_READY\n');

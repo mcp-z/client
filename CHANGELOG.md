@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.5.1]
+
+### Fixed
+
+- On Windows, closing a server that was started through `cmd.exe` (a `.cmd` file, `npm`) now also stops the processes it started. Before, the real server could keep running and `close()` reported a cleanup failure.
+
 ## [2.5.0]
 
 ### Changed

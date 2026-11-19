@@ -109,12 +109,46 @@ function isCompletionSuccessful(completion: ProcessCompletion): boolean {
   return completion.closed && completion.processGroupEmpty !== false;
 }
 
-function terminateChild(child: ChildProcess, tree: OwnedProcessTree | undefined): { killed: boolean; error?: Error } {
+// taskkill.exe exits 128 when the process no longer exists (documented by PDQ: https://help.pdq.com/hc/en-us/articles/220509147-Running-TaskKill-using-PDQ-Deploy; Microsoft publishes no exit-code table).
+const TASKKILL_PROCESS_NOT_FOUND = 128;
+
+/** Stops the live direct child and everything below it; `/T` walks down from that root at this moment. */
+function terminateWindowsProcessTree(pid: number): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const taskkill = crossSpawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], shell: false, windowsHide: true });
+    let stderr = '';
+    taskkill.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    // A stalled taskkill is left running; the caller still kills the direct child.
+    const timer = setTimeout(() => reject(new Error(`taskkill.exe did not finish within ${PROCESS_TERMINATION_TIMEOUT_MS}ms for process tree rooted at PID ${pid}`)), PROCESS_TERMINATION_TIMEOUT_MS);
+    taskkill.once('error', (error) => {
+      clearTimeout(timer);
+      reject(withCause(`taskkill.exe could not be started for process tree rooted at PID ${pid}: ${error.message}`, error));
+    });
+    taskkill.once('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0 || code === TASKKILL_PROCESS_NOT_FOUND) return resolve(code === 0);
+      reject(new Error(`taskkill.exe failed to stop process tree rooted at PID ${pid} (exit code ${code ?? 'unknown'})${stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+    });
+  });
+}
+
+async function terminateChild(child: ChildProcess, tree: OwnedProcessTree | undefined): Promise<{ killed: boolean; error?: Error }> {
   if (tree) return tree.terminate();
+  let treeError: Error | undefined;
+  let treeKilled = false;
+  if (process.platform === 'win32' && child.pid && child.exitCode === null && child.signalCode === null) {
+    try {
+      treeKilled = await terminateWindowsProcessTree(child.pid);
+    } catch (error) {
+      treeError = asError(error);
+    }
+  }
   try {
-    return { killed: child.kill('SIGKILL') };
+    return { killed: child.kill('SIGKILL') || treeKilled, ...(treeError && { error: treeError }) };
   } catch (error) {
-    return { killed: false, error: asError(error) };
+    return { killed: treeKilled, error: treeError ? new AggregateError([treeError, asError(error)], `${treeError.message}; ${asError(error).message}`) : asError(error) };
   }
 }
 
@@ -183,11 +217,11 @@ async function runStopCommand(command: StopCommandConfig, cwd: string, timeoutMs
   const tree = child.pid && process.platform !== 'win32' ? new OwnedProcessTree(child.pid) : undefined;
   const completion = await waitForCompletion(closeEvent, () => closed, tree, timeoutMs);
   if (!isCompletionSuccessful(completion)) {
-    const termination = terminateChild(child, tree);
+    const termination = await terminateChild(child, tree);
     const afterTermination = await waitForCompletion(closeEvent, () => closed, tree, PROCESS_TERMINATION_TIMEOUT_MS);
     const details = [completion.error?.message, termination.error?.message].filter(Boolean).join('; ');
     const reason = `Stop command exceeded ${timeoutMs}ms and required emergency process termination`;
-    const remaining = !isCompletionSuccessful(afterTermination) ? '; stop command or its POSIX process group remained alive' : '';
+    const remaining = !isCompletionSuccessful(afterTermination) ? '; stop command or its process group remained alive' : '';
     throw new Error(`${reason}${details ? `: ${details}` : ''}${remaining}`);
   }
 
@@ -307,7 +341,7 @@ export function spawnProcess(opts: SpawnProcessOptions): ServerProcess {
     }
 
     if (!isCompletionSuccessful(completion)) {
-      const termination = terminateChild(child, tree);
+      const termination = await terminateChild(child, tree);
       killed ||= termination.killed;
       if (termination.error) errors.push(withCause(`Emergency termination failed for server '${name}'`, termination.error));
       completion = await waitForCompletion(closeEvent, () => isClosed, tree, PROCESS_TERMINATION_TIMEOUT_MS);

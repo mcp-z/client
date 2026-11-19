@@ -5,13 +5,16 @@
 import '../../lib/env-loader.ts';
 import { createServerRegistry, type ServerRegistry } from '@mcp-z/client';
 import assert from 'assert';
-import { type ChildProcess, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import getPort from 'get-port';
 import * as path from 'path';
 import * as process from 'process';
 import { fileURLToPath } from 'url';
 import type { StartConfig } from '../../../src/types.ts';
+import { forceStopProcess, isProcessAlive, waitForChildClose, waitForProcessExit } from '../../lib/process-helpers.ts';
+import { waitForOutput } from '../../lib/wait-for-output.ts';
+import { waitForPidFile } from '../../lib/wait-for-pid-file.ts';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -19,28 +22,6 @@ const __dirname = path.dirname(__filename);
 
 // Project root directory (avoid process.cwd() - brittle!)
 const projectRoot = path.resolve(__dirname, '../../..');
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-}
-
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
-  const startedAt = Date.now();
-  while (isProcessAlive(pid)) {
-    if (Date.now() - startedAt >= timeoutMs) throw new Error(`Process ${pid} is still running`);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-}
-
-function waitForChildClose(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
-  return new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
-}
 
 async function waitForHttpReady(url: string, timeoutMs: number): Promise<void> {
   const startedAt = Date.now();
@@ -58,20 +39,28 @@ async function waitForHttpReady(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`HTTP fixture did not become ready at ${url}: ${lastError?.message ?? 'no response'}`);
 }
 
-function forceStopProcess(pid: number): void {
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-  }
-}
-
 function nestedErrorMessages(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const nested = error instanceof AggregateError ? error.errors.map((entry) => nestedErrorMessages(entry)).join('; ') : '';
   const cause = 'cause' in error ? nestedErrorMessages(error.cause) : '';
   return `${error.message}${nested ? `; ${nested}` : ''}${cause ? `; ${cause}` : ''}`;
 }
+
+function scratchPidFile(label: string): string {
+  const pidFile = path.resolve('.tmp', `${label}-${process.pid}-${Date.now()}.pid`);
+  fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+  return pidFile;
+}
+
+// Ends a leftover process so a red test leaves nothing running.
+async function terminateIfAlive(pid: number | undefined): Promise<void> {
+  if (pid === undefined || !isProcessAlive(pid)) return;
+  forceStopProcess(pid);
+  await waitForProcessExit(pid, 2000);
+}
+
+const npmLauncherDir = path.join(projectRoot, 'test/lib/servers/npm-launcher');
+const itWindows = process.platform === 'win32' ? it : it.skip; // cmd.exe exists only on Windows
 
 describe('createServerRegistry', () => {
   let registry: ServerRegistry | undefined;
@@ -411,45 +400,113 @@ describe('createServerRegistry', () => {
     }
   });
 
-  it('should report launcher closure without claiming Windows descendant containment', async () => {
-    const pidFile = path.resolve('.tmp', `owned-descendant-${process.pid}-${Date.now()}.pid`);
-    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+  it('should terminate a descendant that outlives its launcher', async () => {
+    const pidFile = scratchPidFile('owned-descendant');
     const serverRegistry = createServerRegistry({ parent: { command: process.execPath, args: ['test/lib/servers/process-tree-parent.mjs', 'parent', pidFile] } }, { cwd: projectRoot });
     const server = serverRegistry.servers.get('parent');
     assert.ok(server?.process.pid, 'owned parent should have a process ID');
-    const parentClose = waitForChildClose(server.process);
+    const launcherPid = server.process.pid;
+    const launcherClosed = waitForChildClose(server.process);
     let descendantPid: number | undefined;
 
     try {
-      const closed = await parentClose;
-      assert.strictEqual(closed.code, 0, 'the fixture parent should exit normally');
-      assert.ok(fs.existsSync(pidFile), 'the descendant should report its PID before the launcher exits');
-      descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
-      assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 0, 'the descendant should record a valid PID');
-      if (process.platform !== 'win32') assert.ok(isProcessAlive(descendantPid), 'the POSIX descendant should remain in its owned process group after its parent exits');
-
-      const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+      descendantPid = await waitForPidFile(pidFile);
       if (process.platform === 'win32') {
-        assert.strictEqual(result.timedOut, false, 'the launcher should already be closed');
-        // Do not use this observation to claim Windows descendant cleanup. No
-        // ownership handle tracks the descendant, and its lifetime is external.
-        assert.strictEqual(result.killedCount, 0, 'Windows descendant containment is not claimed without process ownership handles');
+        // On Windows the descendant ends with its node launcher, so only the end state is checked.
+        await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+        await waitForProcessExit(launcherPid, 2000);
+        await waitForProcessExit(descendantPid, 2000);
       } else {
-        assert.strictEqual(result.timedOut, true, `the surviving POSIX group member should exceed cooperative shutdown: ${JSON.stringify(result)}`);
-        assert.strictEqual(result.killedCount, 1, 'POSIX process-group force termination must be visible');
+        const closed = await launcherClosed;
+        assert.strictEqual(closed.code, 0, 'the fixture parent should exit normally');
+        assert.ok(isProcessAlive(descendantPid), 'the descendant should be running before close');
+        const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+        assert.strictEqual(result.timedOut, true, `the surviving descendant should exceed cooperative shutdown: ${JSON.stringify(result)}`);
+        assert.strictEqual(result.killedCount, 1, 'process-tree force termination must be visible');
         await waitForProcessExit(descendantPid, 2000);
       }
     } finally {
       await serverRegistry.close().catch(() => undefined);
-      if (descendantPid && isProcessAlive(descendantPid)) {
-        forceStopProcess(descendantPid);
-        await waitForProcessExit(descendantPid, 2000);
-      }
+      await terminateIfAlive(descendantPid);
       fs.rmSync(pidFile, { force: true });
     }
   });
 
-  it('should bound a hanging stop command and expose its Windows descendant limit', async () => {
+  async function assertUnresponsiveStdioServerTerminated(command: string, args: string[]): Promise<void> {
+    const pidFile = scratchPidFile('stdio-launcher');
+    const serverRegistry = createServerRegistry({ launched: { command, args: [...args, pidFile] } }, { cwd: projectRoot });
+    const server = serverRegistry.servers.get('launched');
+    assert.ok(server?.process.pid, 'launcher should have a process ID');
+    const launcherClosed = waitForChildClose(server.process);
+    let serverPid: number | undefined;
+
+    try {
+      serverPid = await waitForPidFile(pidFile, launcherClosed);
+      assert.ok(isProcessAlive(serverPid), 'the server should be running before close');
+      const result = await serverRegistry.close('SIGINT', { timeoutMs: 100 });
+      assert.strictEqual(result.timedOut, true, `the unresponsive server should exceed cooperative shutdown: ${JSON.stringify(result)}`);
+      assert.strictEqual(result.killedCount, 1, 'process-tree force termination must be visible');
+      await waitForProcessExit(serverPid, 2000);
+    } finally {
+      await serverRegistry.close().catch(() => undefined);
+      await terminateIfAlive(serverPid);
+      fs.rmSync(pidFile, { force: true });
+    }
+  }
+
+  it('should terminate an unresponsive stdio server behind a live launcher', async () => {
+    await assertUnresponsiveStdioServerTerminated(process.execPath, ['test/lib/servers/stdio-launcher.mjs']);
+  });
+
+  itWindows('should terminate an unresponsive stdio server behind a .cmd launcher', async () => {
+    await assertUnresponsiveStdioServerTerminated(path.join(projectRoot, 'test/lib/servers/stdio-launcher.cmd'), []);
+  });
+
+  // The real npm launcher chain (cmd.exe -> node -> cmd.exe -> node on Windows); the fixture has no dependencies and the update notifier is off, so nothing reaches the network.
+  it('should terminate an unresponsive stdio server behind npm run', async () => {
+    await assertUnresponsiveStdioServerTerminated('npm', ['run', '--silent', '--no-update-notifier', 'serve', '--prefix', npmLauncherDir, '--']);
+  });
+
+  async function assertHttpStartServerTerminated(command: string, args: string[]): Promise<void> {
+    const port = await getPort({ host: '127.0.0.1' });
+    const pidFile = scratchPidFile('http-launcher');
+    const serverRegistry = createServerRegistry(
+      {
+        'http-behind-launcher': {
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          start: { command, args: [...args, pidFile, String(port)] },
+        },
+      },
+      { cwd: projectRoot, dialects: ['start'] }
+    );
+    const owned = serverRegistry.servers.get('http-behind-launcher');
+    assert.ok(owned, 'the registry should own the started HTTP server');
+    const launcherClosed = waitForChildClose(owned.process);
+    let serverPid: number | undefined;
+
+    try {
+      serverPid = await waitForPidFile(pidFile, launcherClosed);
+      await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+      await serverRegistry.close('SIGINT', { timeoutMs: 1000 });
+      await waitForProcessExit(serverPid, 2000);
+      await assert.rejects(fetch(`http://127.0.0.1:${port}/`), 'the port should refuse connections after close');
+    } finally {
+      await serverRegistry.close().catch(() => undefined);
+      await terminateIfAlive(serverPid);
+      fs.rmSync(pidFile, { force: true });
+    }
+  }
+
+  it('should terminate an HTTP start server behind a launcher without a stop command', async () => {
+    await assertHttpStartServerTerminated(process.execPath, ['test/lib/servers/http-launcher.mjs']);
+  });
+
+  itWindows('should terminate an HTTP start server behind a .cmd launcher without a stop command', async () => {
+    await assertHttpStartServerTerminated(path.join(projectRoot, 'test/lib/servers/http-launcher.cmd'), []);
+  });
+
+  it('should bound a hanging stop command', async () => {
     const port = await getPort({ host: '127.0.0.1' });
     const pidFile = path.resolve('.tmp', `hanging-stop-${process.pid}-${Date.now()}.pid`);
     fs.mkdirSync(path.dirname(pidFile), { recursive: true });
@@ -470,25 +527,27 @@ describe('createServerRegistry', () => {
     const server = stopRegistry.servers.get('http-server');
     assert.ok(server?.process.pid, 'owned HTTP server should have a process ID');
     const serverClose = waitForChildClose(server.process);
-    let stopDescendantPid: number | undefined;
 
     try {
       await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
-      await assert.rejects(stopRegistry.close('SIGINT', { timeoutMs: 100 }), (error: unknown) => error instanceof AggregateError && /stop command exceeded 100ms/i.test(nestedErrorMessages(error)));
+      await assert.rejects(stopRegistry.close('SIGINT', { timeoutMs: 100 }), (error: unknown) => {
+        if (!(error instanceof AggregateError)) return false;
+        const messages = nestedErrorMessages(error);
+        return /stop command exceeded 100ms/i.test(messages) && !/remained alive/i.test(messages);
+      });
       const closed = await serverClose;
       assert.ok(closed.signal !== null || closed.code !== 0, 'the server should be terminated after stop-command failure');
-      const pidStartedAt = Date.now();
-      while (!fs.existsSync(pidFile) && Date.now() - pidStartedAt < 2000) await new Promise((resolve) => setTimeout(resolve, 25));
-      assert.ok(fs.existsSync(pidFile), 'the hanging stop command should have recorded its descendant');
-      stopDescendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
-      if (process.platform !== 'win32') {
-        await waitForProcessExit(stopDescendantPid, 2000);
-      }
+      const stopDescendantPid = await waitForPidFile(pidFile);
+      await waitForProcessExit(stopDescendantPid, 2000);
     } finally {
       await stopRegistry.close().catch(() => undefined);
-      if (stopDescendantPid && isProcessAlive(stopDescendantPid)) {
-        forceStopProcess(stopDescendantPid);
-        await waitForProcessExit(stopDescendantPid, 2000);
+      const recorded = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8') : '';
+      if (/^\d+$/.test(recorded)) {
+        const stopDescendantPid = Number(recorded);
+        if (isProcessAlive(stopDescendantPid)) {
+          forceStopProcess(stopDescendantPid);
+          await waitForProcessExit(stopDescendantPid, 2000);
+        }
       }
       fs.rmSync(pidFile, { force: true });
     }
@@ -517,6 +576,7 @@ describe('createServerRegistry', () => {
     const badClose = waitForChildClose(badServer.process);
     const goodClose = waitForChildClose(goodServer.process);
     await waitForHttpReady(`http://127.0.0.1:${port}/`, 5000);
+    await failingRegistry.connect('good-stdio');
 
     await assert.rejects(failingRegistry.close('SIGINT', { timeoutMs: 150 }), (error: unknown) => {
       if (!(error instanceof AggregateError)) return false;
@@ -561,9 +621,13 @@ describe('createServerRegistry', () => {
     const racingRegistry = createServerRegistry({ stalled: { command: 'node', args: ['test/lib/servers/stalled-stdio.mjs'] } }, { cwd: projectRoot });
     const server = racingRegistry.servers.get('stalled');
     assert.ok(server?.process.pid, 'stalled server should have a process ID');
+    let stderr = '';
+    server.process.stderr?.on('data', (chunk) => {
+      stderr += chunk;
+    });
     const childClose = waitForChildClose(server.process);
     const connecting = racingRegistry.connect('stalled');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForOutput(() => stderr, /STALLED_READY/);
     const startedAt = Date.now();
     const closing = racingRegistry.close('SIGINT', { timeoutMs: 100 });
 

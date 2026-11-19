@@ -1,0 +1,8 @@
+{
+  "name": "npm-launcher-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "serve": "node ../unresponsive-stdio.mjs"
+  }
+}
