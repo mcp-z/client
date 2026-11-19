@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Saved sign-ins in the default store (`.mcp-z/tokens.json`) no longer overwrite, or get overwritten by, the servers or other processes using the same file. Each change is saved under a lock and every read sees the current file. The file is now written with mode 0600. An older client or mcp-z server running beside this one still rewrites the file, so upgrade the cli and servers together.
+- Saved sign-ins in the default store (`.mcp-z/tokens.json`) no longer overwrite, or get overwritten by, the servers or other processes using the same file. Each change is saved under a lock and every read sees the current file. The file is now written with mode 0600 on macOS and Linux. An older client or mcp-z server running beside this one still rewrites the file, so upgrade the cli and servers together.
 - A damaged `.mcp-z/tokens.json` is reported with its path and left unchanged. Before, it was read as having no sign-ins and then overwritten. Move the file aside or repair it to continue.
 - `keyv-registry` `^3.1.0`, which the shared store requires, is now the minimum; `proper-lockfile`, `@keyv/serialize` and `temp-suffix` are installed with the package, and `keyv-file` no longer is.
 
