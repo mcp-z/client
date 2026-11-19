@@ -10,6 +10,7 @@ import type { AuthCapabilities, TokenSet } from '@mcp-z/client';
 import { DcrAuthenticator } from '@mcp-z/client';
 import assert from 'assert';
 import fs from 'fs';
+import { safeRmSync } from 'fs-remove-compat';
 import getPort from 'get-port';
 import Keyv from 'keyv';
 import { KeyvFile } from 'keyv-file';
@@ -272,6 +273,92 @@ describe('unit/auth/dcr-authenticator', () => {
       return true;
     });
   });
+  describe('default store shared by several processes', () => {
+    const ISSUER = 'https://issuer.example.com';
+    const R1 = 'https://one.example.com/mcp';
+    const R2 = 'https://two.example.com/mcp';
+    const R3 = 'https://three.example.com/mcp';
+    const key = (resource: string) => `tokens:${ISSUER}:${resource}`;
+    const redirectUri = 'http://localhost:3000/callback';
+    const originalCwd = process.cwd();
+    let workDir: string;
+
+    const storeFile = () => path.join(process.cwd(), '.mcp-z', 'tokens.json');
+    const signIn = (resource: string): TokenSet => ({ accessToken: `access-${resource}`, refreshToken: 'refresh', expiresAt: Date.now() + 3600000, issuer: ISSUER });
+
+    // Writes the file the way the previous release did, through keyv-file.
+    async function seed(...resources: string[]): Promise<void> {
+      fs.mkdirSync(path.dirname(storeFile()), { recursive: true });
+      const writer = new Keyv({ store: new KeyvFile({ filename: storeFile() }) });
+      for (const resource of resources) await writer.set(key(resource), signIn(resource));
+    }
+
+    beforeEach(() => {
+      fs.mkdirSync(path.resolve('.tmp'), { recursive: true });
+      workDir = fs.mkdtempSync(path.join(path.resolve('.tmp'), 'shared-'));
+      process.chdir(workDir);
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      safeRmSync(workDir, { recursive: true, force: true });
+    });
+
+    it('reads sign-ins written by the previous release (keyv-file format)', async () => {
+      await seed(R1);
+      const authenticator = new DcrAuthenticator({ redirectUri, headless: true });
+
+      const tokens = await authenticator.ensureAuthenticated(R1, { supportsDcr: true, issuer: ISSUER });
+
+      assert.strictEqual(tokens.accessToken, `access-${R1}`);
+    });
+
+    it('rejects naming the file and leaves it untouched when the default file is damaged', async () => {
+      fs.mkdirSync(path.dirname(storeFile()), { recursive: true });
+      const damaged = '{"cache": [["tokens:x", {"value": ';
+      fs.writeFileSync(storeFile(), damaged);
+      const authenticator = new DcrAuthenticator({ redirectUri, headless: true });
+
+      await assert.rejects(authenticator.deleteTokens(R1), (error: Error) => {
+        assert.ok(error.message.includes(storeFile()), error.message);
+        return true;
+      });
+      await assert.rejects(authenticator.ensureAuthenticated(R1, { supportsDcr: true, issuer: ISSUER }), (error: Error) => error.message.includes(storeFile()));
+
+      assert.strictEqual(fs.readFileSync(storeFile(), 'utf8'), damaged);
+    });
+
+    it("keeps each other's changes when two authenticators write to one directory", async () => {
+      await seed(R1, R2, R3);
+      const a = new DcrAuthenticator({ redirectUri });
+      const b = new DcrAuthenticator({ redirectUri });
+
+      await a.deleteTokens(R1);
+      await b.deleteTokens(R2);
+
+      const reader = new Keyv({ store: new KeyvFile({ filename: storeFile() }) });
+      assert.strictEqual(await reader.get(key(R1)), undefined, "a's delete survives b's write");
+      assert.strictEqual(await reader.get(key(R2)), undefined, "b's delete is saved");
+      assert.ok(await reader.get(key(R3)), 'untouched sign-in is kept');
+    });
+
+    it("sees the other authenticator's change without reopening", async () => {
+      await seed(R1, R2);
+      const a = new DcrAuthenticator({ redirectUri, headless: true });
+      const b = new DcrAuthenticator({ redirectUri, headless: true });
+      const capabilities: AuthCapabilities = { supportsDcr: true, issuer: ISSUER };
+
+      assert.strictEqual((await b.ensureAuthenticated(R1, capabilities)).accessToken, `access-${R1}`);
+      assert.strictEqual((await a.ensureAuthenticated(R2, capabilities)).accessToken, `access-${R2}`);
+
+      await a.deleteTokens(R1);
+      await assert.rejects(b.ensureAuthenticated(R1, capabilities), /does not provide required OAuth endpoints/, "b sees a's delete");
+
+      await b.deleteTokens(R2);
+      await assert.rejects(a.ensureAuthenticated(R2, capabilities), /does not provide required OAuth endpoints/, "a sees b's delete");
+    });
+  });
+
   describe('default store written by keyv 5', () => {
     const storeFile = () => path.join(workDir, '.mcp-z', 'tokens.json');
     const debugLogger = (messages: string[]) => ({ debug: (m: string) => messages.push(m), info() {}, warn() {}, error() {} }) as unknown as import('@mcp-z/client').Logger;
@@ -326,26 +413,20 @@ describe('unit/auth/dcr-authenticator', () => {
       assert.strictEqual(messages.filter((m) => m.startsWith('Moved ')).length, 1, messages.join('\n'));
     });
 
-    it('retries a failed migration on the next call and names the migration in the error', async () => {
+    it('retries opening the store on the next call after a failure', async () => {
       const messages: string[] = [];
+      fs.writeFileSync(storeFile(), '{"cache": [');
       const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback', logger: debugLogger(messages) });
-      const store = (authenticator as unknown as { tokenStore: Keyv }).tokenStore;
-      const realIterator = store.iterator.bind(store);
-      let calls = 0;
-      store.iterator = ((...args: Parameters<typeof realIterator>) => {
-        if (++calls === 1) throw new Error('iterator failed');
-        return realIterator(...args);
-      }) as typeof store.iterator;
 
       await assert.rejects(authenticator.deleteTokens('https://dummy.example/mcp'), (error: Error) => {
-        assert.ok(error.message.includes('saved sign-ins'), error.message);
-        assert.strictEqual((error.cause as Error).message, 'iterator failed');
+        assert.ok(error.message.includes(storeFile()), error.message);
         return true;
       });
+      fs.copyFileSync(fixture, storeFile());
       await authenticator.deleteTokens('https://dummy.example/mcp');
       assert.ok(
         messages.some((m) => m.startsWith('Moved ')),
-        'second call migrated'
+        'second call opened the store and migrated'
       );
     });
   });
