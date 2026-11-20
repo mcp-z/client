@@ -10,6 +10,8 @@ import type { CallbackResult } from './types.ts';
 export interface OAuthCallbackListenerOptions {
   /** Port to listen on (required - use get-port package to find available port) */
   port: number;
+  /** Host to bind and to report in the callback URL (defaults to `localhost`). Use the host of the redirect URI the authorization server was given. */
+  host?: string;
   /** Optional logger for debug output (defaults to singleton logger) */
   logger?: Logger;
 }
@@ -26,10 +28,12 @@ export class OAuthCallbackListener {
   private rejectCallback?: (error: Error) => void;
   private timeout: NodeJS.Timeout | undefined;
   private port: number;
+  private host: string;
   private logger: Logger;
 
   constructor(options: OAuthCallbackListenerOptions) {
     this.port = options.port;
+    this.host = options.host ?? 'localhost';
     this.logger = options.logger ?? defaultLogger;
   }
 
@@ -39,7 +43,7 @@ export class OAuthCallbackListener {
    */
   async start(): Promise<void> {
     await this.listen(this.port);
-    this.logger.debug(`✅ Callback server listening on http://localhost:${this.port}/callback`);
+    this.logger.debug(`✅ Callback server listening on http://${this.host}:${this.port}/callback`);
   }
 
   /**
@@ -55,7 +59,7 @@ export class OAuthCallbackListener {
         reject(error);
       });
 
-      this.server.listen(port, 'localhost', () => {
+      this.server.listen(port, this.host, () => {
         resolve();
       });
     });
@@ -65,7 +69,7 @@ export class OAuthCallbackListener {
    * Handle incoming HTTP requests
    */
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const url = new URL(req.url || '', `http://localhost:${this.port}`);
+    const url = new URL(req.url || '', `http://${this.host}:${this.port}`);
 
     if (url.pathname === '/callback') {
       this.handleCallback(url, res);
@@ -224,6 +228,6 @@ export class OAuthCallbackListener {
     if (!this.port) {
       throw new Error('Server not started - call start() first');
     }
-    return `http://localhost:${this.port}/callback`;
+    return `http://${this.host}:${this.port}/callback`;
   }
 }

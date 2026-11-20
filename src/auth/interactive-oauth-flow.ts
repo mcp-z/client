@@ -3,11 +3,11 @@
  * Manages browser-based OAuth flows and token exchange with PKCE support
  */
 
-import openUrl from '../lib/open-url.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { discoveryFetch } from './discovery-fetch.ts';
 import { OAuthCallbackListener } from './oauth-callback-listener.ts';
 import { generatePkce } from './pkce.ts';
+import { presentAuthorizationUrl } from './present-authorization-url.ts';
 import type { OAuthFlowOptions, PkceParams, TokenSet } from './types.ts';
 
 /**
@@ -88,22 +88,7 @@ export class InteractiveOAuthFlow {
         authUrl.searchParams.set('code_challenge_method', pkce.codeChallengeMethod);
       }
 
-      // Open browser or print URL for headless mode
-      if (options.headless) {
-        logger.info('🔗 Please visit this URL to authorize:');
-        logger.info(authUrl.toString());
-        logger.info('Waiting for callback...');
-      } else {
-        logger.debug('🌐 Opening browser for OAuth authorization...');
-        try {
-          await openUrl(authUrl.toString());
-        } catch (error) {
-          // The flow keeps waiting for the callback, so the user can open the URL by hand.
-          logger.warn('Could not open the browser:', error instanceof Error ? error.message : String(error));
-          logger.info('🔗 Please visit this URL to authorize:');
-          logger.info(authUrl.toString());
-        }
-      }
+      await presentAuthorizationUrl(authUrl.toString(), { headless: options.headless, logger });
       throwIfAborted(options.signal);
 
       // Wait for callback with timeout

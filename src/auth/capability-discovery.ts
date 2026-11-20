@@ -47,7 +47,11 @@ function getOrigin(url: string): string {
  */
 function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: string[], resource?: string): AuthCapabilities {
   const supportsDcr = !!metadata.registration_endpoint;
-  const capabilities: AuthCapabilities = { supportsDcr, authorizationResponseIssSupported: metadata.authorization_response_iss_parameter_supported === true };
+  const capabilities: AuthCapabilities = { supportsDcr, authorizationResponseIssSupported: metadata.authorization_response_iss_parameter_supported === true, authorizationServerMetadata: metadata };
+
+  if (metadata.client_id_metadata_document_supported === true) {
+    capabilities.supportsCimd = true;
+  }
 
   if (metadata.issuer) {
     capabilities.issuer = metadata.issuer;
@@ -80,9 +84,20 @@ function buildCapabilities(metadata: AuthorizationServerMetadata, scopes?: strin
   return capabilities;
 }
 
+/**
+ * The issuer in the metadata must be the authorization server the metadata was fetched for (RFC 8414 section 3.3).
+ * Otherwise a server could name another issuer, whose credentials the client holds, and point the token endpoint at itself.
+ */
+function assertIssuerMatches(metadata: AuthorizationServerMetadata, authServerUrl: string): void {
+  if (metadata.issuer !== undefined && normalizeUrl(metadata.issuer) !== normalizeUrl(authServerUrl)) {
+    throw new Error('Authorization server metadata names a different issuer than the authorization server it was fetched for (RFC 8414 section 3.3) - refusing to use it');
+  }
+}
+
 async function resolveCapabilitiesFromAuthorizationServer(authServerUrl: string, scopes: string[] | undefined, allowLoopback: boolean, resource?: string, signal?: AbortSignal): Promise<AuthCapabilities | null> {
   const metadata = await discoverAuthorizationServerMetadata(authServerUrl, { allowLoopback, signal });
   if (!metadata) return null;
+  assertIssuerMatches(metadata, authServerUrl);
   return buildCapabilities(metadata, scopes, resource);
 }
 
@@ -127,7 +142,10 @@ export async function probeAuthCapabilities(baseUrl: string, options: { signal?:
   // This handles same-domain OAuth (traditional setup)
   const origin = getOrigin(normalizedBaseUrl);
   const originMetadata = await speculativeProbe(signal, () => discoverAuthorizationServerMetadata(origin, { allowLoopback, signal }));
-  if (originMetadata) return buildCapabilities(originMetadata);
+  if (originMetadata) {
+    assertIssuerMatches(originMetadata, origin);
+    return buildCapabilities(originMetadata);
+  }
 
   // No OAuth metadata found
   return { supportsDcr: false };

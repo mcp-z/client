@@ -97,24 +97,46 @@ which enforces:
 - A single, generic error message on failure so internal network topology is
   never reflected back to whatever triggered the discovery.
 
-## DCR and OAuth Flow
-When a server requires OAuth:
-1) **DCR (RFC 7591)** registers a client using the `registration_endpoint`, as
-   `application_type: "native"` with the OS-assigned loopback redirect URI the
-   callback listener has already bound (RFC 8252).
-2) **Authorization Code + PKCE (RFC 6749 + RFC 7636)** is used to obtain tokens.
-3) **Token exchange** uses the `token_endpoint` defined in RFC 8414 metadata.
-4) **`iss` validation (RFC 9207)** compares the authorization response's `iss`
-   against the issuer discovered before the flow started. A mismatch, or an
-   omitted `iss` from a server advertising
-   `authorization_response_iss_parameter_supported`, aborts the flow and the
-   authorization code is never redeemed.
-5) **`resource` (RFC 8707)** carries the canonical resource server URI on the
-   authorization, token, and refresh requests, so issued tokens are
-   audience-bound to one resource.
-6) **Credentials are keyed by issuer** (`tokens:{issuer}:{resource}`) and carry
+## OAuth Flow
+`DcrAuthenticator` runs the MCP SDK's `auth()` over a `StoreOAuthProvider`
+(`src/auth/oauth-provider.ts`). Discovery has already been done by
+`probeAuthCapabilities`, so the provider hands it to `auth()` as its discovery
+state, and every request `auth()` makes goes through `discoveryFetch`. When a
+server offers a way to get a client:
+1) **Client identity**, in the SDK's order: a stored client first; else, when
+   the caller passed `clientMetadataUrl` and the server sets
+   `client_id_metadata_document_supported`, that URL (CIMD) is the `client_id`;
+   else **DCR (RFC 7591)** registers a client as `application_type: "native"`
+   with the loopback redirect URI. Without `clientMetadataUrl` no document is
+   offered, without `clientName` the registration has no `client_name`, and a
+   token response without `expires_in` leaves the expiry unknown (the 401 is
+   what tells), instead of a guess of ours.
+2) **Authorization Code + PKCE (RFC 6749 + RFC 7636)** obtains tokens. The
+   callback listener binds the redirect URI's host and port
+   (`http://127.0.0.1:<port>/callback`) before the browser is opened, and the
+   `state` of the response must match.
+3) **`iss` validation (RFC 9207)** compares the authorization response's `iss`
+   against the issuer discovered before the flow started.
+4) **`resource` (RFC 8707)** carries the resource server's own name from its
+   RFC 9728 metadata (the configured URL when there is none) on the
+   authorization, token, and refresh requests. The authorization server
+   metadata is handed to `auth()` as it was received.
+5) **Credentials are keyed by issuer and server** (`tokens:{issuer}:{server URL}`, the configured URL normalized) and carry
    the issuer they were granted by, so a resource whose authorization server
    changes re-authorizes instead of presenting the previous server's tokens.
+   Tokens keep the `TokenSet` shape; a client registration is stored under
+   `client:{issuer}:{server URL}` (the configured URL, as for `tokens:`), or, for a sign-in made by an earlier release,
+   inside its token entry.
+6) **Transports** get an `AuthProvider` from `SignIn.authProvider`: the stored
+   token on every request, and on a 401 a refresh. When a new sign-in is needed
+   the browser step starts (only while connecting) and the transport fails with
+   the SDK's `UnauthorizedError`; `connectMcpClient` then finishes the sign-in
+   (outside the connection time limit) and connects once more, and a failed
+   sign-in does not fall back to SSE. After connecting, a 401 refreshes but
+   never opens a browser. A request that could not reach the server, or got a
+   5xx, never deletes stored credentials and never starts a sign-in.
+7) **Opening the URL** (`presentAuthorizationUrl`) opens the browser, or prints
+   the URL when headless or when the browser cannot be opened.
 
 These flows are implemented in:
 - `src/auth/*`

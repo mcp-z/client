@@ -4,14 +4,11 @@
  */
 
 import '../../lib/env-loader.ts';
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import type { AuthCapabilities, TokenSet } from '@mcp-z/client';
 import { DcrAuthenticator } from '@mcp-z/client';
 import assert from 'assert';
 import fs from 'fs';
 import { safeRmSync } from 'fs-remove-compat';
-import getPort from 'get-port';
 import Keyv from 'keyv';
 import { KeyvFile } from 'keyv-file';
 import path from 'path';
@@ -158,81 +155,6 @@ describe('unit/auth/dcr-authenticator', () => {
     await assert.rejects(authenticator.ensureAuthenticated(RESOURCE, { supportsDcr: true }), (error: Error) => {
       assert.ok(error.message.includes('has no issuer'), error.message);
       return true;
-    });
-  });
-
-  describe('self-hosted token verification', () => {
-    const SELF_ISSUER = 'http://localhost';
-    const caps = (base: string): AuthCapabilities => ({ supportsDcr: true, issuer: SELF_ISSUER, registrationEndpoint: `${base}/oauth/register`, authorizationEndpoint: `${base}/oauth/authorize`, tokenEndpoint: `${base}/oauth/token` });
-
-    async function withVerifyServer(status: number, run: (base: string) => Promise<void>): Promise<void> {
-      const server = http.createServer((_req, res) => {
-        res.writeHead(status, { 'content-type': 'application/json' });
-        res.end('{}');
-      });
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      try {
-        await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-      } finally {
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-    }
-
-    function storedKey(base: string): string {
-      return `dcr-tokens:${SELF_ISSUER}:${base}`;
-    }
-
-    async function seed(base: string): Promise<Keyv> {
-      const tokenStore = new Keyv();
-      await tokenStore.set(storedKey(base), { accessToken: 'stored_access_token', refreshToken: 'stored_refresh_token', expiresAt: Date.now() + 3600000, clientId: 'c', issuer: SELF_ISSUER } satisfies TokenSet);
-      return tokenStore;
-    }
-
-    it('should keep the stored token and reject when the verify request fails to connect', async () => {
-      const port = await getPort({ host: '127.0.0.1' });
-      const base = `http://127.0.0.1:${port}`;
-      const tokenStore = await seed(base);
-      const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
-
-      await assert.rejects(authenticator.ensureAuthenticated(base, caps(base)));
-
-      assert.ok(await tokenStore.get(storedKey(base)), 'a network failure must not delete the stored sign-in');
-    });
-
-    it('should keep the stored token and rethrow the abort when the verify request is aborted in flight', async () => {
-      let requestSeen!: () => void;
-      const seen = new Promise<void>((resolve) => (requestSeen = resolve));
-      const server = http.createServer(() => requestSeen()); // never answers
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      try {
-        const tokenStore = await seed(base);
-        const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
-        const controller = new AbortController();
-        const reason = new Error('cancelled');
-
-        const pending = authenticator.ensureAuthenticated(base, caps(base), controller.signal);
-        await seen;
-        controller.abort(reason);
-
-        await assert.rejects(pending, (error: unknown) => error === reason);
-        assert.ok(await tokenStore.get(storedKey(base)), 'an abort must not delete the stored sign-in');
-      } finally {
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-    });
-
-    it('should delete the stored token when the server answers that it is invalid', async () => {
-      await withVerifyServer(401, async (base) => {
-        const tokenStore = await seed(base);
-        const authenticator = new DcrAuthenticator({ tokenStore, redirectUri: 'http://localhost:3000/callback', headless: true });
-
-        await assert.rejects(authenticator.ensureAuthenticated(base, { supportsDcr: true, issuer: SELF_ISSUER }), /does not provide required OAuth endpoints/);
-
-        assert.strictEqual(await tokenStore.get(storedKey(base)), undefined);
-      });
     });
   });
 

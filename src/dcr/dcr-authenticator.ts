@@ -1,19 +1,12 @@
 /**
  * DCR Authenticator
- * Consolidates DCR and OAuth flow logic for MCP HTTP servers
+ * Signs in to MCP HTTP servers through the SDK's auth(): a client metadata document (CIMD) when the server accepts one, dynamic registration (DCR) otherwise
  */
 
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import type Keyv from 'keyv';
-import createStore, { migrateKeyv5Keys } from 'keyv-registry';
-import { isLoopbackUrl } from '../auth/discovery-fetch.ts';
-import { InteractiveOAuthFlow } from '../auth/interactive-oauth-flow.ts';
-import type { AuthCapabilities, OAuthFlowOptions, TokenSet } from '../auth/types.ts';
-import { DEFAULT_STORE_DIR, DEFAULT_STORE_FILE, SHARED_FILE_PROTOCOL } from '../constants.ts';
-import { extractBaseUrl, normalizeUrl } from '../lib/url-utils.ts';
-import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
-import { DynamicClientRegistrar } from './dynamic-client-registrar.ts';
+import type { AuthCapabilities, TokenSet } from '../auth/types.ts';
+import type { Logger } from '../utils/logger.ts';
+import { SignIn } from './sign-in.ts';
 
 /**
  * DcrAuthenticator configuration options
@@ -27,103 +20,29 @@ export interface DcrAuthenticatorOptions {
   redirectUri: string;
   /** Optional logger for debug output (defaults to singleton logger) */
   logger?: Logger;
+  /**
+   * https URL of a client metadata document the application hosts, sent as the `client_id` to servers that accept one (CIMD).
+   * There is no default: without it the client never offers a document and registers (DCR), so a server that offers only CIMD fails with the SDK's error.
+   */
+  clientMetadataUrl?: string;
+  /** Name the client registers under (DCR). Without it the registration carries no `client_name`. */
+  clientName?: string;
 }
 
 /**
- * Buffer time before token expiry to trigger proactive refresh (5 minutes)
- */
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-/** Raised when a credential cannot be bound to, or looked up by, an issuer. */
-class CredentialBindingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CredentialBindingError';
-  }
-}
-
-/**
- * The issuer credentials are keyed by, so they can never be presented to a
- * different authorization server even when the resource keeps its URL (SEP-2352).
- */
-function requireIssuer(capabilities: AuthCapabilities): string {
-  if (!capabilities.issuer) {
-    throw new CredentialBindingError('Authorization server metadata has no issuer - credentials cannot be bound to an authorization server (RFC 8414 requires issuer)');
-  }
-  return capabilities.issuer;
-}
-
-/**
- * DcrAuthenticator manages authentication for MCP HTTP servers
- * Handles DCR registration, OAuth flows, and token management
+ * DcrAuthenticator manages authentication for MCP HTTP servers.
+ * It runs the SDK's auth() over the token store: registration (a client metadata document or DCR), the browser sign-in, and token refresh.
  */
 export class DcrAuthenticator {
-  private tokenStore!: Keyv;
-  private dcrClient: DynamicClientRegistrar;
-  private oauthFlow: InteractiveOAuthFlow;
-  private headless: boolean;
-  private redirectUri: string;
-  private logger: Logger;
-  /** Set only for the default store: its path, opened on first use. */
-  private defaultStorePath?: string;
-  private defaultStoreReady?: Promise<void>;
+  private signIn: SignIn;
 
   constructor(options: DcrAuthenticatorOptions) {
-    if (options.tokenStore) {
-      this.tokenStore = options.tokenStore;
-    } else {
-      this.defaultStorePath = path.join(process.cwd(), DEFAULT_STORE_DIR, DEFAULT_STORE_FILE);
-    }
-    this.dcrClient = new DynamicClientRegistrar();
-    this.oauthFlow = new InteractiveOAuthFlow();
-    this.headless = options.headless || false;
-    this.redirectUri = options.redirectUri;
-    this.logger = options.logger ?? defaultLogger;
+    this.signIn = new SignIn(options);
   }
 
   /**
-   * Opens the default store, shared with other processes through a locked file, and moves sign-ins saved by keyv 5 once.
-   * A failure is not cached, so the next call retries.
-   */
-  private async ready(): Promise<void> {
-    const storePath = this.defaultStorePath;
-    if (!storePath) return;
-    this.defaultStoreReady ??= this.openDefaultStore(storePath).catch((error) => {
-      this.defaultStoreReady = undefined;
-      throw error;
-    });
-    await this.defaultStoreReady;
-  }
-
-  private async openDefaultStore(storePath: string): Promise<void> {
-    this.tokenStore = await createStore(pathToFileURL(storePath).href.replace(/^file:/, SHARED_FILE_PROTOCOL));
-    try {
-      const moved = await migrateKeyv5Keys(this.tokenStore);
-      if (moved > 0) this.logger.debug(`Moved ${moved} saved sign-in entries to the keyv 6 format`);
-    } catch (error) {
-      throw new Error('Moving saved sign-ins to the keyv 6 format failed', { cause: error });
-    }
-  }
-
-  /**
-   * Detect if server is self-hosted DCR (vs external OAuth provider)
-   * Self-hosted servers have their own OAuth endpoints and manage token storage
-   */
-  private async detectSelfHostedMode(mcpServerUrl: string): Promise<boolean> {
-    try {
-      // Self-hosted DCR servers typically run their own OAuth server
-      // Check if this is a self-hosted instance by testing OAuth metadata
-      // For now, assume self-hosted if the URL matches common localhost patterns
-      // TODO: Implement proper self-hosted detection logic
-      return mcpServerUrl.includes('localhost') || mcpServerUrl.includes('127.0.0.1');
-    } catch (_error) {
-      return false; // Assume external mode if detection fails
-    }
-  }
-
-  /**
-   * Ensure server is authenticated, performing DCR and OAuth if needed
-   * Proactively refreshes tokens if they're within 5 minutes of expiry
+   * Ensure server is authenticated, signing in if needed
+   * Returns a stored sign-in as it is unless it expires within 5 minutes; then it is refreshed, and a new sign-in is made when it cannot be
    *
    * @param mcpServerUrl - The MCP server's canonical URL, exactly as configured,
    *   with its path intact (`https://example.com/mcp`). Not a deployment root:
@@ -134,224 +53,18 @@ export class DcrAuthenticator {
    * @throws Error if authentication fails
    *
    * @example
-   * const authenticator = new DcrAuthenticator({ redirectUri: 'http://localhost:3000/callback' });
+   * const authenticator = new DcrAuthenticator({ redirectUri: 'http://127.0.0.1:3000/callback' });
    * const tokens = await authenticator.ensureAuthenticated(
    *   'https://example.com/mcp',
    *   capabilities
    * );
    */
   async ensureAuthenticated(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
-    throwIfAborted(signal);
-    await this.ready();
-    // Auto-detect server mode
-    const isSelfHosted = await this.detectSelfHostedMode(mcpServerUrl);
-
-    if (isSelfHosted) {
-      return this.ensureAuthenticatedSelfHosted(mcpServerUrl, capabilities, signal);
-    }
-    return this.ensureAuthenticatedExternal(mcpServerUrl, capabilities, signal);
+    return this.signIn.ensureAuthenticated(mcpServerUrl, capabilities, signal);
   }
 
   /**
-   * The three things a server URL is used for here, kept apart on purpose.
-   *
-   * They were one value once, and collapsing them is what sent an authorization
-   * server the wrong audience: `resource` was derived from the deployment root,
-   * so a server at `https://host/mcp` was asked to mint a token for
-   * `https://host`, and any server that validates the indicator answered
-   * `invalid_target`.
-   *
-   * - `serverBaseUrl` builds the server's own endpoints (`/oauth/verify`), so a
-   *   trailing `/mcp` comes off.
-   * - `resource` is the RFC 8707 audience. The resource server names itself in
-   *   its RFC 9728 metadata; that name wins. Only when no such document exists
-   *   do we fall back to the URL we were configured with.
-   * - `storeKey` identifies the credential locally. It stays the configured URL
-   *   rather than the discovered `resource`, so it can be computed without a
-   *   network round trip - `deleteTokens` has only the URL to work from.
-   */
-  private resolveUrls(mcpServerUrl: string, capabilities: AuthCapabilities): { serverBaseUrl: string; resource: string; storeKey: string } {
-    const storeKey = normalizeUrl(mcpServerUrl);
-    return { serverBaseUrl: extractBaseUrl(mcpServerUrl), resource: capabilities.resource ?? storeKey, storeKey };
-  }
-
-  /**
-   * Handle authentication for self-hosted DCR servers
-   * Self-hosted servers manage their own token storage via /oauth/verify
-   */
-  private async ensureAuthenticatedSelfHosted(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
-    // Loopback trust for every discovery-derived fetch below, computed from
-    // the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
-    const allowLoopback = isLoopbackUrl(mcpServerUrl);
-    const issuer = requireIssuer(capabilities);
-    const { serverBaseUrl, resource, storeKey } = this.resolveUrls(mcpServerUrl, capabilities);
-    const dcrTokenKey = `dcr-tokens:${issuer}:${storeKey}`;
-
-    // 1. Check for existing DCR tokens (different from external tokens)
-    let tokens = await this.loadTokens(dcrTokenKey, issuer);
-
-    if (tokens) {
-      // 2. Verify token is still valid by calling /oauth/verify. A request that
-      // fails (network, abort) rejects here and leaves the stored token alone;
-      // only the server's answer that the token is invalid deletes it.
-      const verifyUrl = `${serverBaseUrl}/oauth/verify`;
-      const verifyResponse = await fetch(verifyUrl, {
-        headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
-        signal,
-      });
-
-      if (verifyResponse.ok) {
-        const verifyData = (await verifyResponse.json()) as { token?: string };
-        if (verifyData.token === tokens.accessToken) {
-          // Token is still valid with the self-hosted server
-          return tokens;
-        }
-      }
-
-      // The server answered and the token is expired or invalid
-      await this.tokenStore.delete(dcrTokenKey);
-      tokens = undefined;
-    }
-
-    // 3. No valid tokens - perform full DCR + OAuth flow
-    if (!capabilities.registrationEndpoint || !capabilities.authorizationEndpoint || !capabilities.tokenEndpoint) {
-      throw new Error('Server does not provide required OAuth endpoints');
-    }
-
-    this.logger.debug('🔐 No valid tokens found, starting self-hosted DCR authentication...');
-
-    // Extract port from pre-resolved redirectUri
-    const port = parseInt(new URL(this.redirectUri).port, 10) || (this.redirectUri.startsWith('https:') ? 443 : 80);
-
-    // Register OAuth client via DCR
-    this.logger.debug('📝 Registering OAuth client with self-hosted server...');
-    const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
-      redirectUri: this.redirectUri,
-      allowLoopback,
-      signal,
-    });
-
-    // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback, signal);
-
-    tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
-
-    // For self-hosted mode, verify the token works with /oauth/verify immediately
-    try {
-      const verifyUrl = `${serverBaseUrl}/oauth/verify`;
-      const verifyResponse = await fetch(verifyUrl, {
-        headers: { Authorization: `Bearer ${tokens.accessToken}`, Connection: 'close' },
-        signal,
-      });
-
-      if (!verifyResponse.ok) {
-        throw new Error(`DCR token verification failed after authentication: ${verifyResponse.status}`);
-      }
-
-      const verifyData = (await verifyResponse.json()) as { token?: string };
-      if (verifyData.token !== tokens.accessToken) {
-        throw new Error('DCR server returned different token in verification');
-      }
-
-      this.logger.debug('✅ DCR token verified with self-hosted server');
-    } catch (error) {
-      this.logger.error('❌ DCR token verification failed:', error instanceof Error ? error.message : String(error));
-      throw new Error('Self-hosted DCR authentication completed but token verification failed');
-    }
-
-    // Save tokens for future use
-    await this.tokenStore.set(dcrTokenKey, { ...tokens, issuer });
-    this.logger.debug('✅ Self-hosted DCR authentication successful, tokens saved');
-
-    return tokens;
-  }
-
-  /** Handles authentication for external (non-self-hosted) OAuth providers. */
-  private async ensureAuthenticatedExternal(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal): Promise<TokenSet> {
-    // See ensureAuthenticatedSelfHosted - same loopback trust rule.
-    const allowLoopback = isLoopbackUrl(mcpServerUrl);
-    const issuer = requireIssuer(capabilities);
-    const { resource, storeKey } = this.resolveUrls(mcpServerUrl, capabilities);
-    const tokenKey = `tokens:${issuer}:${storeKey}`;
-
-    // 1. Check for existing tokens
-    let tokens = await this.loadTokens(tokenKey, issuer);
-
-    if (tokens) {
-      // 2. Proactive refresh if token expires within 5 minutes
-      if (tokens.expiresAt < Date.now() + REFRESH_BUFFER_MS) {
-        this.logger.debug('🔄 Refreshing access token...');
-
-        try {
-          tokens = await this.refreshTokens(tokens, capabilities.tokenEndpoint, resource, allowLoopback, signal);
-          await this.tokenStore.set(tokenKey, { ...tokens, issuer });
-          this.logger.debug('✅ Token refreshed successfully');
-        } catch (_error) {
-          // Refresh failed - clear tokens and re-authenticate
-          this.logger.warn('⚠️  Token refresh failed, re-authenticating...');
-          await this.tokenStore.delete(tokenKey);
-          tokens = undefined;
-        }
-      }
-
-      if (tokens) {
-        return tokens;
-      }
-    }
-
-    // 3. No valid tokens - perform DCR + OAuth flow
-    if (!capabilities.registrationEndpoint || !capabilities.authorizationEndpoint || !capabilities.tokenEndpoint) {
-      throw new Error('Server does not provide required OAuth endpoints');
-    }
-
-    this.logger.debug('🔐 No valid tokens found, starting external OAuth authentication...');
-
-    // Extract port from pre-resolved redirectUri
-    const port = parseInt(new URL(this.redirectUri).port, 10) || (this.redirectUri.startsWith('https:') ? 443 : 80);
-
-    // Register OAuth client via DCR
-    this.logger.debug('📝 Registering OAuth client...');
-    const client = await this.dcrClient.registerClient(capabilities.registrationEndpoint, {
-      redirectUri: this.redirectUri,
-      allowLoopback,
-      signal,
-    });
-
-    // Perform OAuth authorization flow with PKCE (RFC 7636)
-    const flowOptions = this.buildFlowOptions(port, capabilities, issuer, resource, allowLoopback, signal);
-
-    tokens = await this.oauthFlow.performAuthFlow(capabilities.authorizationEndpoint, capabilities.tokenEndpoint, client.clientId, client.clientSecret, flowOptions);
-
-    // Save tokens for future use
-    await this.tokenStore.set(tokenKey, { ...tokens, issuer });
-    this.logger.debug('✅ Authentication successful, tokens saved');
-
-    return tokens;
-  }
-
-  /**
-   * Refreshes an access token using a refresh token.
-   * @param resource - Canonical resource server URI, audience-binding the token (RFC 8707).
-   * @param allowLoopback - Loopback trust grant computed from the server actually being talked to (SSRF mitigation, see discovery-fetch.ts). Defaults to `false`.
-   */
-  private async refreshTokens(tokens: TokenSet, tokenEndpoint: string | undefined, resource: string, allowLoopback = false, signal?: AbortSignal): Promise<TokenSet> {
-    if (!tokenEndpoint) {
-      throw new Error('Token endpoint not available for refresh');
-    }
-
-    if (!tokens.refreshToken) {
-      throw new Error('No refresh token available');
-    }
-
-    if (!tokens.clientId || !tokens.clientSecret) {
-      throw new Error('Client credentials not available for refresh');
-    }
-
-    return await this.oauthFlow.refreshTokens(tokenEndpoint, tokens.refreshToken, tokens.clientId, tokens.clientSecret, resource, allowLoopback, signal);
-  }
-
-  /**
-   * Deletes both stored token families for a server, across every issuer they were bound to.
+   * Deletes the stored sign-in for a server, across every issuer it was bound to: its tokens (both families earlier releases wrote) and its client registration.
    *
    * Takes the same `mcpServerUrl` that {@link DcrAuthenticator.ensureAuthenticated}
    * was given - keys are built from the configured URL, never from the discovered
@@ -360,48 +73,6 @@ export class DcrAuthenticator {
    * The token store must support iteration (see the README); a store that cannot list its keys deletes nothing.
    */
   async deleteTokens(mcpServerUrl: string): Promise<void> {
-    const suffix = `:${normalizeUrl(mcpServerUrl)}`;
-    await this.ready();
-
-    for await (const [key] of this.tokenStore.iterator()) {
-      if (typeof key === 'string' && (key.startsWith('tokens:') || key.startsWith('dcr-tokens:')) && key.endsWith(suffix)) {
-        await this.tokenStore.delete(key);
-      }
-    }
-    this.logger.debug(`🗑️  Deleted tokens for ${mcpServerUrl}`);
+    return this.signIn.deleteTokens(mcpServerUrl);
   }
-
-  /** Discards a stored credential that is not bound to `issuer` (SEP-2352), including one stored before issuer binding existed. */
-  private async loadTokens(key: string, issuer: string): Promise<TokenSet | undefined> {
-    const tokens = (await this.tokenStore.get(key)) as TokenSet | undefined;
-    if (!tokens) return undefined;
-    if (tokens.issuer === issuer) return tokens;
-
-    this.logger.debug('🔑 Stored credential is not bound to the discovered issuer, re-authorizing');
-    await this.tokenStore.delete(key);
-    return undefined;
-  }
-
-  private buildFlowOptions(port: number, capabilities: AuthCapabilities, issuer: string, resource: string, allowLoopback: boolean, signal?: AbortSignal): OAuthFlowOptions {
-    const flowOptions: OAuthFlowOptions = {
-      port,
-      issuer,
-      resource,
-      headless: this.headless,
-      redirectUri: this.redirectUri,
-      pkce: true,
-      logger: this.logger,
-      allowLoopback,
-      ...(signal && { signal }),
-      authorizationResponseIssSupported: capabilities.authorizationResponseIssSupported ?? false,
-    };
-    if (capabilities.scopes) {
-      flowOptions.scopes = capabilities.scopes;
-    }
-    return flowOptions;
-  }
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Authentication was cancelled');
 }

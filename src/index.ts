@@ -12,7 +12,7 @@ export type { McpServerEntry, StartConfig, StopCommandConfig } from '../schemas/
 // Auth - OAuth utilities
 export { probeAuthCapabilities } from './auth/capability-discovery.ts';
 export { DiscoveryFetchError, isLoopbackUrl } from './auth/discovery-fetch.ts';
-export type { AuthCapabilities, CallbackResult, OAuthCallbackListenerOptions, OAuthFlowOptions, TokenSet } from './auth/index.ts';
+export type { AuthCapabilities, AuthorizationServerMetadata, CallbackResult, OAuthCallbackListenerOptions, OAuthFlowOptions, TokenSet } from './auth/index.ts';
 export { InteractiveOAuthFlow } from './auth/interactive-oauth-flow.ts';
 export { OAuthCallbackListener } from './auth/oauth-callback-listener.ts';
 // Client helpers and lightweight overloads

@@ -35,7 +35,7 @@ export interface TokenSet {
   accessToken: string;
   /** Refresh token for obtaining new access tokens */
   refreshToken: string;
-  /** Timestamp when access token expires (milliseconds since epoch) */
+  /** Timestamp when access token expires (milliseconds since epoch). Not finite (`NaN`, or `null` once saved) when the server did not say: the expiry is then unknown, and the token is used until the server answers 401. */
   expiresAt: number;
   /** Scopes granted for this token set */
   scopes?: string[];
@@ -87,6 +87,10 @@ export interface AuthorizationServerMetadata {
   token_endpoint_auth_methods_supported?: string[];
   /** Whether the authorization response carries an `iss` parameter (RFC 9207) */
   authorization_response_iss_parameter_supported?: boolean;
+  /** Whether the server accepts an https URL of a client metadata document as a `client_id` (CIMD) */
+  client_id_metadata_document_supported?: boolean;
+  /** PKCE methods supported (RFC 8414) */
+  code_challenge_methods_supported?: string[];
 }
 
 /**
@@ -95,6 +99,10 @@ export interface AuthorizationServerMetadata {
 export interface AuthCapabilities {
   /** Whether the server supports Dynamic Client Registration (RFC 7591) */
   supportsDcr: boolean;
+  /** Set when the server accepts the URL of a client metadata document as a `client_id` (CIMD) */
+  supportsCimd?: boolean;
+  /** The authorization server metadata as it was received, handed to the SDK's auth() unchanged */
+  authorizationServerMetadata?: AuthorizationServerMetadata;
   /** Issuer identifier from the authorization server metadata (RFC 8414) */
   issuer?: string;
   /**

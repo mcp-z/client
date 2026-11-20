@@ -5,13 +5,14 @@
  * Automatically detects transport type from URL protocol or type field.
  */
 
-import type { ClientOptions, Transport, VersionNegotiationOptions } from '@modelcontextprotocol/client';
-import { Client, SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import type { AuthProvider, ClientOptions, Transport, VersionNegotiationOptions } from '@modelcontextprotocol/client';
+import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import getPort from 'get-port';
 import { probeAuthCapabilities } from '../auth/index.ts';
 import { DCR_CAPABILTY_DISCOVERY_TIMEOUT } from '../constants.ts';
-import { DcrAuthenticator, type DcrAuthenticatorOptions } from '../dcr/index.ts';
+import type { DcrAuthenticatorOptions } from '../dcr/index.ts';
+import { SignIn } from '../dcr/sign-in.ts';
 import { normalizeUrl } from '../lib/url-utils.ts';
 import type { ServerProcess } from '../spawn/spawn-server.ts';
 import type { ServersConfig } from '../spawn/spawn-servers.ts';
@@ -102,6 +103,14 @@ export async function connectTransport(client: Client, transport: Transport, sig
   } finally {
     if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
   }
+}
+
+/** Static headers from the config plus, when the server signs in, the provider that supplies the Authorization header. */
+function httpTransportOptions(headers: Record<string, string> | undefined, authProvider: AuthProvider | undefined) {
+  const options: { requestInit?: { headers: Record<string, string> }; authProvider?: AuthProvider } = {};
+  if (headers && Object.keys(headers).length > 0) options.requestInit = { headers };
+  if (authProvider) options.authProvider = authProvider;
+  return Object.keys(options).length > 0 ? options : undefined;
 }
 
 /**
@@ -232,6 +241,8 @@ export async function connectMcpClient(
 
   // Create MCP client
   const client = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
+  // The client that ends up connected: the first one, or the one made after a transport signed in again.
+  let connected = client;
 
   // Connect based on inferred transport
   if (transportType === 'stdio') {
@@ -285,56 +296,72 @@ export async function connectMcpClient(
     const mcpServerUrl = normalizeUrl(serverConfig.url);
     const capabilities = await withAbortTimeout((signal) => probeAuthCapabilities(mcpServerUrl, { signal }), DCR_CAPABILTY_DISCOVERY_TIMEOUT, 'DCR capability discovery', options?.signal);
 
-    let authToken: string | undefined;
+    let authProvider: AuthProvider | undefined;
+    let signIn: SignIn | undefined;
+    // Set once a transport has asked to sign in again: whatever follows is that sign-in's outcome, not a reason to try another transport.
+    let signInAttempted = false;
 
-    if (capabilities.supportsDcr) {
-      logger.debug(`🔐 Server '${serverName}' supports DCR authentication`);
+    // A server that offers a client metadata document or dynamic registration gives the client a way to sign in.
+    if (capabilities.supportsDcr || capabilities.supportsCimd) {
+      logger.debug(`🔐 Server '${serverName}' supports OAuth sign-in`);
 
-      // Get available port and create the exact redirect URI to use
-      const port = await getPort({ host: 'localhost' });
-      const redirectUri = `http://localhost:${port}/callback`;
+      // The loopback IP literal, which RFC 8252 section 8.3 recommends over `localhost`
+      const port = await getPort({ host: '127.0.0.1' });
+      const redirectUri = `http://127.0.0.1:${port}/callback`;
 
       // Handle authentication using DcrAuthenticator with fully resolved redirectUri
-      const authenticator = new DcrAuthenticator({
+      const authenticator = new SignIn({
         headless: false,
         redirectUri,
         logger,
         ...options?.dcrAuthenticator,
       });
 
-      // Ensure we have valid tokens (performs DCR + OAuth if needed)
-      const tokens = await authenticator.ensureAuthenticated(mcpServerUrl, capabilities, options?.signal);
-      authToken = tokens.accessToken;
+      // Ensure we have valid tokens (registers and signs in if needed)
+      signIn = authenticator;
+      await authenticator.ensureAuthenticated(mcpServerUrl, capabilities, options?.signal);
+      // The transports read the token from it on every request and, on a 401, refresh it or sign in again.
+      authProvider = authenticator.authProvider(mcpServerUrl, capabilities, options?.signal);
 
       logger.debug(`✅ Authentication complete for '${serverName}'`);
     } else {
-      logger.debug(`ℹ️  Server '${serverName}' does not support DCR - connecting without authentication`);
+      logger.debug(`ℹ️  Server '${serverName}' offers no way to sign in (no client metadata document, no registration) - connecting without authentication`);
     }
 
+    /**
+     * Connects, and when the server asked the transport to sign in again, finishes that sign-in (the user's browser step takes as long as it takes, so it
+     * is outside the connection time limit) and connects once more with a new client and transport, as the SDK's UnauthorizedError sequence prescribes.
+     */
+    const connectWithSignIn = async (first: Client, makeTransport: () => Transport, operation: string): Promise<Client> => {
+      if (signIn) signIn.connecting = true;
+      try {
+        await connectTransportWithTimeout(first, makeTransport(), HTTP_CONNECTION_TIMEOUT_MS, operation, options?.signal);
+        return first;
+      } catch (error) {
+        if (!signIn || !UnauthorizedError.isInstance(error)) {
+          await signIn?.discardPending();
+          throw error;
+        }
+        signInAttempted = true;
+        if (!(await signIn.completePending())) throw error;
+        const retry = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
+        await connectTransportWithTimeout(retry, makeTransport(), HTTP_CONNECTION_TIMEOUT_MS, operation, options?.signal);
+        return retry;
+      } finally {
+        if (signIn) signIn.connecting = false;
+      }
+    };
     try {
       // Try modern Streamable HTTP first (protocol version 2025-03-26)
-      // Merge static headers from config with DCR auth headers (DCR Authorization takes precedence)
-      const staticHeaders = serverConfig.headers || {};
-      const dcrHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-      const mergedHeaders: Record<string, string> = { ...staticHeaders, ...dcrHeaders };
+      const transportOptions = httpTransportOptions(serverConfig.headers, authProvider);
 
-      const transportOptions =
-        Object.keys(mergedHeaders).length > 0
-          ? {
-              requestInit: {
-                headers: mergedHeaders,
-              },
-            }
-          : undefined;
-
-      const transport = new StreamableHTTPClientTransport(url, transportOptions);
       // Type assertion: SDK transport has sessionId: string | undefined but Transport expects string
       // This is safe at runtime - the undefined is valid per MCP spec
-      await connectTransportWithTimeout(client, transport as unknown as Transport, HTTP_CONNECTION_TIMEOUT_MS, 'StreamableHTTP connection', options?.signal);
+      connected = await connectWithSignIn(client, () => new StreamableHTTPClientTransport(url, transportOptions) as unknown as Transport, 'StreamableHTTP connection');
     } catch (error) {
       // Cancellation and cleanup failures must reach the caller; neither can
       // safely be converted into an SSE fallback attempt.
-      if (options?.signal?.aborted || error instanceof AggregateError) throw error;
+      if (options?.signal?.aborted || error instanceof AggregateError || signInAttempted) throw error;
       // Fall back to SSE transport (MCP protocol version 2024-11-05)
       // SSE is a standard MCP transport used by many servers (e.g., FastMCP ecosystem)
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -364,28 +391,10 @@ export async function connectMcpClient(
       // Create new client for SSE transport (required per SDK pattern)
       const sseClient = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
 
-      // SSE transport with merged headers (static + DCR auth)
-      // Reuse the same header merging logic as Streamable HTTP
-      const staticHeaders = serverConfig.headers || {};
-      const dcrHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-      const mergedHeaders: Record<string, string> = { ...staticHeaders, ...dcrHeaders };
-
-      const sseTransportOptions =
-        Object.keys(mergedHeaders).length > 0
-          ? {
-              requestInit: {
-                headers: mergedHeaders,
-              },
-            }
-          : undefined;
-
-      const sseTransport = new SSEClientTransport(url, sseTransportOptions);
-
-      await connectTransportWithTimeout(sseClient, sseTransport, HTTP_CONNECTION_TIMEOUT_MS, 'SSE connection', options?.signal);
-      // Return SSE client instead of original
-      return sseClient;
+      // Return the SSE client instead of the original
+      return await connectWithSignIn(sseClient, () => new SSEClientTransport(url, httpTransportOptions(serverConfig.headers, authProvider)), 'SSE connection');
     }
   }
 
-  return client; // Guaranteed ready when returned
+  return connected; // Guaranteed ready when returned
 }

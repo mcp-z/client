@@ -171,9 +171,16 @@ const results = await registry.searchCapabilities('message send', {
 - `env` - Base env for all servers (if set, `process.env` is not merged)
 - `dialects` - Which servers to spawn: `['servers']` (stdio), `['start']` (HTTP start blocks), or both
 
-## OAuth (DCR)
+## OAuth
 
-If an HTTP server supports DCR, pass a token store via `dcrAuthenticator`:
+When an HTTP server publishes OAuth metadata and offers dynamic client registration (DCR) or client metadata documents (CIMD), `connect` signs in before it connects: it opens your browser, waits for the sign-in on a loopback address (`http://127.0.0.1:<port>/callback`), and saves the tokens. How the client identifies itself is up to you:
+
+- By default it registers itself (DCR) and keeps the registration with the tokens; a registration the server rejects is replaced by a new one. The registration carries a `client_name` only if you pass `dcrAuthenticator: { clientName }`.
+- If you pass `dcrAuthenticator: { clientMetadataUrl }`, the client sends that URL as its `client_id` to servers that accept client metadata documents, and registers on the others. Nothing is registered at a CIMD server and no client secret is stored. A server that offers only CIMD and gets no `clientMetadataUrl` fails with "Incompatible auth server: does not support dynamic client registration".
+
+A server that offers neither, such as one that needs a pre-registered client id, is connected to without signing in.
+
+Pass a token store via `dcrAuthenticator`:
 
 ```ts
 import Keyv from 'keyv';
@@ -188,7 +195,11 @@ const client = await registry.connect('todoist', {
 });
 ```
 
-A custom `tokenStore` must be a keyv 6 `Keyv` whose store can list its keys (memory, file and sqlite can); `deleteTokens()` needs that to find a server's tokens. Sign-ins saved by keyv 5 in the default store are moved to the keyv 6 format on first use.
+Without a `tokenStore`, sign-ins are saved in `.mcp-z/tokens.json` in the working directory. A custom `tokenStore` must be a keyv 6 `Keyv` whose store can list its keys (memory, file and sqlite can); `deleteTokens()` needs that to find a server's tokens. Sign-ins saved by keyv 5 in the default store are moved to the keyv 6 format on first use, and sign-ins saved by earlier releases keep working.
+
+### Client metadata document
+
+`clientMetadataUrl` must be an https URL, with a path, of a JSON document that you, the application's owner, host and keep at that URL (it is the client's identity at every server). It lists `redirect_uris` `["http://127.0.0.1/callback"]` (the client calls back on a random port, which a server must accept for a loopback address), `token_endpoint_auth_method` `"none"` and `application_type` `"native"`. The server fetches the document, so it must be reachable from the server. Servers built on oauth-google or oauth-microsoft before 2.4.3 advertise CIMD but refuse a redirect on a port the document does not list, so do not pass `clientMetadataUrl` for them: they register.
 
 ## Protocol version negotiation
 

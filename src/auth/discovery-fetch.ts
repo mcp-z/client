@@ -397,6 +397,10 @@ export async function discoveryFetch(rawUrl: string, init: RequestInit = {}, con
   while (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location');
     if (!location) break;
+    // A redirect would resend the body and headers: the code, refresh token and client secret of a token or registration request.
+    if (carriesCredentials(init)) {
+      throw new DiscoveryFetchError(`Refusing to follow a redirect from ${context}: the request carries credentials`);
+    }
     if (redirectsLeft <= 0) {
       throw new DiscoveryFetchError(`Refusing to fetch ${context}: too many redirects`);
     }
@@ -413,6 +417,12 @@ export async function discoveryFetch(rawUrl: string, init: RequestInit = {}, con
   }
 
   return response;
+}
+
+/** True for any request that is not a plain GET or HEAD, or that carries a body or an Authorization header. */
+function carriesCredentials(init: RequestInit): boolean {
+  const method = (init.method ?? 'GET').toUpperCase();
+  return (method !== 'GET' && method !== 'HEAD') || init.body != null || new Headers(init.headers).has('authorization');
 }
 
 /**

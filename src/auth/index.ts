@@ -8,4 +8,4 @@ export { DiscoveryFetchError, isLoopbackUrl } from './discovery-fetch.ts';
 export { InteractiveOAuthFlow } from './interactive-oauth-flow.ts';
 export type { OAuthCallbackListenerOptions } from './oauth-callback-listener.ts';
 export { OAuthCallbackListener } from './oauth-callback-listener.ts';
-export type { AuthCapabilities, CallbackResult, OAuthFlowOptions, TokenSet } from './types.ts';
+export type { AuthCapabilities, AuthorizationServerMetadata, CallbackResult, OAuthFlowOptions, TokenSet } from './types.ts';

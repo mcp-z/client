@@ -36,7 +36,7 @@ export class DynamicClientRegistrar {
    */
   async registerClient(registrationEndpoint: string, options: DcrRegistrationOptions): Promise<ClientCredentials> {
     const requestBody: DcrRegistrationRequest = {
-      client_name: options.clientName || '@mcp-z/client',
+      ...(options.clientName && { client_name: options.clientName }),
       redirect_uris: [options.redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],

@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.6.0] - 2026-11-20
+
+### Security
+
+- An authorization server whose metadata names a different issuer than the one it was fetched for (RFC 8414 section 3.3) is now refused in discovery, before any token, code or client secret is sent to it. Before, a resource server could name an authorization server whose metadata claimed another issuer and point its token endpoint at itself.
+- A token or registration endpoint that answers with a redirect is now refused instead of followed. Before, the request, including the authorization code, refresh token and client secret, was sent again to the redirect target.
+
+### Added
+
+- `dcrAuthenticator.clientMetadataUrl`: the https URL of a client metadata document your application hosts. When you pass it, the client sends it as its `client_id` to servers that accept client metadata documents (CIMD), so nothing is registered at the server and no client secret is stored; on a server that offers only dynamic registration (DCR) it registers as before. There is no default: without the option the client never offers a document and registers, so a server that offers only CIMD fails with "Incompatible auth server: does not support dynamic client registration". The server must be able to fetch your document. Servers built on oauth-google or oauth-microsoft before 2.4.3 advertise CIMD but refuse a loopback redirect on a port the document does not list, so leave the option out for them.
+- `dcrAuthenticator.clientName`: the name the client registers under (DCR).
+- `probeAuthCapabilities` reports `supportsCimd` and the authorization server metadata as it was received (`authorizationServerMetadata`); `connect` signs in whenever a server offers CIMD or DCR.
+
+### Changed
+
+- Sign-in runs on the MCP SDK's `auth()`. A client the server no longer knows (`invalid_client`) is registered again.
+- The registration no longer carries `client_name` unless you set `clientName`: a server now sees no client name from this client by default (`DynamicClientRegistrar` too).
+- A server that does not return `state` in the authorization response now fails the sign-in, and so does a response with the wrong `state`; before, `state` was not checked.
+- The sign-in callback is on `127.0.0.1` (`http://127.0.0.1:<port>/callback`), not `localhost`. You could notice this if you pass your own `redirectUri` to `dcrAuthenticator` (it is used as given, and a `localhost` one is refused by a CIMD server whose document lists only `127.0.0.1`), if a firewall or proxy rule names `localhost`, or if an authorization server's allow-list holds a redirect URI registered for `localhost`.
+- A server whose protected-resource metadata names a resource that does not contain the server's URL (for example one that publishes `https://other.example/mcp` for `https://host.example/mcp`) is now refused, as RFC 9728 requires, and the connect fails with the SDK's error. Before, the named resource was used as it was, so a misconfigured third-party server that worked will stop working until its metadata is fixed.
+- Servers on `localhost` or `127.0.0.1` are treated like any other server: the client no longer asks them to verify a stored token at `/oauth/verify`. Instead the transports (Streamable HTTP and SSE) refresh the token when the server answers 401, and while connecting they sign in again, opening the browser, when the refresh is refused. A 401 after the client has connected refreshes the token but never opens a browser: a request that needs a new sign-in fails with `UnauthorizedError`, and connecting again signs in. A sign-in that fails while connecting no longer falls back to SSE and opens a second one.
+- A stored sign-in is no longer deleted because the authorization server could not be reached, answered with a server error (5xx), or the request was cancelled; none of these starts a new sign-in either. Only an answer that rejects the credentials (`invalid_grant`, `invalid_client`) does.
+- A token response without `expires_in` is stored with an unknown expiry: the token is used, with no refresh before it, until the server answers 401, and then refreshed. A sign-in saved by an earlier release with no expiry is read the same way instead of being refreshed at every connect.
+- A refresh the server refuses (`invalid_grant`) after the client has connected no longer registers a new client at the server before the request fails with `UnauthorizedError`.
+- A sign-in stored by an earlier release is refreshed with the client authentication method the server advertises, as the server's metadata says.
+- `DcrAuthenticator`, `DynamicClientRegistrar`, `InteractiveOAuthFlow` and `probeAuthCapabilities` stay exported. `OAuthCallbackListener` takes an optional `host`, which defaults to `localhost` as before.
+
+### Fixed
+
+- Existing sign-ins keep working after upgrading: a stored token is used and refreshed with the registration it was made with, tokens in the `dcr-tokens` entries of localhost servers are read, and an expired token that cannot be refreshed is replaced by a new sign-in. New sign-ins are saved in the same `tokens:` entries and shape as before, plus a `client:` entry for the registration; `deleteTokens()` removes all of them. A client older than this release signs in again when a sign-in made through CIMD has expired, because there is no client secret for it to refresh with.
+
 ## [2.5.3] - 2026-11-20
 
 ### Security
