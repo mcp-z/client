@@ -80,6 +80,7 @@
     "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^22",
+    "cross-spawn-cb": "^3.3.1",
     "express": "^5.0.0",
     "fs-remove-compat": "^1.1.1",
     "json-schema-to-typescript": "^16.0.0",

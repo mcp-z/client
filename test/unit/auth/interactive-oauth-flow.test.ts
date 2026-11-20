@@ -50,24 +50,30 @@ async function startTokenEndpoint(): Promise<TokenEndpoint> {
   };
 }
 
-/** Headless mode prints the authorization URL once the callback listener is bound, so awaiting it also sequences the callback below. */
-function createAuthorizeUrlRecorder(): { logger: Logger; authorizeUrl: Promise<URL> } {
+/** The flow logs the authorization URL once the callback listener is bound, so awaiting it also sequences the callback below. `events` keeps the order of warnings and info lines. */
+function createAuthorizeUrlRecorder(urlPrefix = 'http'): { logger: Logger; authorizeUrl: Promise<URL>; events: string[] } {
   let resolveUrl: (url: URL) => void;
   const authorizeUrl = new Promise<URL>((resolve) => {
     resolveUrl = resolve;
   });
+  const events: string[] = [];
   const noop = () => {};
 
   return {
     logger: {
       info: (message: unknown) => {
-        if (typeof message === 'string' && message.startsWith('http')) resolveUrl(new URL(message));
+        if (typeof message !== 'string') return;
+        events.push(`info: ${message}`);
+        if (message.startsWith(urlPrefix)) resolveUrl(new URL(message));
       },
       debug: noop,
-      warn: noop,
+      warn: (...args: unknown[]) => {
+        events.push(`warn: ${args.join(' ')}`);
+      },
       error: noop,
     },
     authorizeUrl,
+    events,
   };
 }
 
@@ -87,10 +93,10 @@ describe('unit/auth/interactive-oauth-flow', () => {
     await tokenEndpoint.close();
   });
 
-  async function runFlow(callbackParams: Record<string, string>, overrides: Partial<OAuthFlowOptions> = {}) {
+  async function runFlow(callbackParams: Record<string, string>, overrides: Partial<OAuthFlowOptions> = {}, authorizationEndpoint = 'https://issuer.example.com/authorize', urlPrefix = 'http') {
     const port = await getPort({ host: 'localhost' });
     const redirectUri = `http://localhost:${port}/callback`;
-    const recorder = createAuthorizeUrlRecorder();
+    const recorder = createAuthorizeUrlRecorder(urlPrefix);
 
     const options: OAuthFlowOptions = {
       port,
@@ -106,14 +112,15 @@ describe('unit/auth/interactive-oauth-flow', () => {
     };
 
     const flow = new InteractiveOAuthFlow();
-    const tokens = flow.performAuthFlow('https://issuer.example.com/authorize', tokenEndpoint.url, 'client-id', 'client-secret', options);
+    const tokens = flow.performAuthFlow(authorizationEndpoint, tokenEndpoint.url, 'client-id', 'client-secret', options);
     // Callers assert on the rejection only after delivering the callback below.
     tokens.catch(() => {});
 
-    const authorizeUrl = await recorder.authorizeUrl;
+    // A flow that fails before logging the URL rejects here instead of leaving the test waiting.
+    const authorizeUrl = await Promise.race([recorder.authorizeUrl, tokens.then(() => Promise.reject(new Error('flow finished before the authorization URL was logged')))]);
     await deliverCallback(redirectUri, callbackParams);
 
-    return { authorizeUrl, tokens };
+    return { authorizeUrl, tokens, events: recorder.events };
   }
 
   it('binds the authorization and token requests to the resource (RFC 8707)', async () => {
@@ -156,6 +163,19 @@ describe('unit/auth/interactive-oauth-flow', () => {
     const { tokens } = await runFlow({ code: 'auth_code_4' });
     const result = await tokens;
 
+    assert.strictEqual(result.accessToken, 'access_granted');
+    assert.strictEqual(tokenEndpoint.bodies.length, 1);
+  });
+
+  it('warns and prints the URL when the browser will not open it, and still completes the flow', async () => {
+    const { authorizeUrl, tokens, events } = await runFlow({ code: 'auth_code_5', iss: ISSUER }, { headless: false }, 'mcp-z-client-refused:authorize', 'mcp-z-client-refused:');
+    const result = await tokens;
+
+    const warning = events.findIndex((event) => event.startsWith('warn: Could not open the browser:'));
+    const urlLine = events.indexOf(`info: ${authorizeUrl.toString()}`);
+    assert.ok(warning >= 0, events.join('\n'));
+    assert.ok(urlLine > warning, 'the URL line follows the warning');
+    assert.strictEqual(events.filter((event) => event.startsWith('info: mcp-z-client-refused:')).length, 1, 'the URL is printed once');
     assert.strictEqual(result.accessToken, 'access_granted');
     assert.strictEqual(tokenEndpoint.bodies.length, 1);
   });

@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.5.3] - 2026-11-20
+
+### Security
+
+- On Windows, sign-in opened the browser through `cmd`, so every authorization URL was cut at its first `&` (sign-in could not complete), and an authorization server could make the URL run another command or send it your environment variable values. The URL is now handed to the browser unchanged on every system, and only `http` and `https` URLs are opened.
+
+### Fixed
+
+- When the browser cannot be opened (no `xdg-open`, a refused URL), sign-in prints the URL to open by hand instead of the process exiting with an unhandled `spawn ENOENT` error.
+
 ## [2.5.2] - 2026-11-19
 
 ### Fixed

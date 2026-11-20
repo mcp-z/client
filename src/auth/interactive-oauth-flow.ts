@@ -3,7 +3,7 @@
  * Manages browser-based OAuth flows and token exchange with PKCE support
  */
 
-import * as child_process from 'node:child_process';
+import openUrl from '../lib/open-url.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import { discoveryFetch } from './discovery-fetch.ts';
 import { OAuthCallbackListener } from './oauth-callback-listener.ts';
@@ -95,8 +95,14 @@ export class InteractiveOAuthFlow {
         logger.info('Waiting for callback...');
       } else {
         logger.debug('🌐 Opening browser for OAuth authorization...');
-        // Try to open browser (requires 'open' package or native command)
-        await this.openBrowser(authUrl.toString());
+        try {
+          await openUrl(authUrl.toString());
+        } catch (error) {
+          // The flow keeps waiting for the callback, so the user can open the URL by hand.
+          logger.warn('Could not open the browser:', error instanceof Error ? error.message : String(error));
+          logger.info('🔗 Please visit this URL to authorize:');
+          logger.info(authUrl.toString());
+        }
       }
       throwIfAborted(options.signal);
 
@@ -262,37 +268,6 @@ export class InteractiveOAuthFlow {
     }
 
     return tokenSet;
-  }
-
-  /**
-   * Open browser to authorization URL
-   * Uses platform-specific command to open default browser
-   */
-  private async openBrowser(url: string): Promise<void> {
-    // Determine platform-specific command
-    const platform = process.platform;
-    let command: string;
-    let args: string[];
-
-    if (platform === 'darwin') {
-      command = 'open';
-      args = [url];
-    } else if (platform === 'win32') {
-      command = 'cmd';
-      args = ['/c', 'start', url];
-    } else {
-      // Linux and others
-      command = 'xdg-open';
-      args = [url];
-    }
-
-    // Spawn browser process
-    const child = child_process.spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-    });
-
-    child.unref();
   }
 }
 
