@@ -3,14 +3,19 @@
  * Provides OAuth endpoints for testing authentication flow
  */
 
+import http from 'node:http';
 import express from 'express';
+import { listenOnFreePort } from '../listen-on-free-port.ts';
 
 /**
  * Start a simple DCR test server for integration testing
  * Implements minimal OAuth/DCR endpoints needed for testing
  */
 export async function startDcrTestServer(config) {
-  const { port, baseUrl, wwwAuthenticateResourceMetadata } = config;
+  const { host, wwwAuthenticateResourceMetadataPath } = config;
+  if (!host) throw new Error('startDcrTestServer requires a host to bind');
+  // Assigned once the server is listening; handlers only run after that.
+  let baseUrl;
 
   // Create Express app
   const app = express();
@@ -52,12 +57,12 @@ export async function startDcrTestServer(config) {
   });
 
   app.get('/mcp', (_req, res) => {
-    if (!wwwAuthenticateResourceMetadata) {
+    if (!wwwAuthenticateResourceMetadataPath) {
       res.status(404).send('Not Found');
       return;
     }
 
-    res.set('WWW-Authenticate', `Bearer resource_metadata="${wwwAuthenticateResourceMetadata}"`);
+    res.set('WWW-Authenticate', `Bearer resource_metadata="${baseUrl}${wwwAuthenticateResourceMetadataPath}"`);
     res.status(401).send('Unauthorized');
   });
 
@@ -156,18 +161,14 @@ export async function startDcrTestServer(config) {
   });
 
   // Start HTTP server with keep-alive disabled for clean test shutdown
-  const httpServer = await new Promise((resolve) => {
-    const server = app.listen(port, () => {
-      console.log(`🔧 DCR Test Server listening on ${baseUrl}`);
-      console.log(`   RFC 8414: ${baseUrl}/.well-known/oauth-authorization-server`);
-      console.log(`   RFC 9728: ${baseUrl}/.well-known/oauth-protected-resource`);
-      console.log(`   RFC 9728: ${baseUrl}/.well-known/oauth-protected-resource/mcp`);
-      resolve(server);
-    });
-    // Disable keep-alive to allow clean shutdown
-    server.keepAliveTimeout = 0;
-    server.headersTimeout = 0;
-  });
+  const httpServer = http.createServer(app);
+  httpServer.keepAliveTimeout = 0;
+  httpServer.headersTimeout = 0;
+  baseUrl = `http://${host}:${await listenOnFreePort(httpServer, host)}`;
+  console.log(`🔧 DCR Test Server listening on ${baseUrl}`);
+  console.log(`   RFC 8414: ${baseUrl}/.well-known/oauth-authorization-server`);
+  console.log(`   RFC 9728: ${baseUrl}/.well-known/oauth-protected-resource`);
+  console.log(`   RFC 9728: ${baseUrl}/.well-known/oauth-protected-resource/mcp`);
 
   return {
     url: baseUrl,
