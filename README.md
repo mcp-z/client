@@ -173,7 +173,7 @@ const results = await registry.searchCapabilities('message send', {
 
 ## OAuth
 
-When an HTTP server publishes OAuth metadata and offers dynamic client registration (DCR) or client metadata documents (CIMD), `connect` signs in before it connects: it opens your browser, waits for the sign-in on a loopback address (`http://127.0.0.1:<port>/callback`), and saves the tokens. How the client identifies itself is up to you:
+When an HTTP server publishes OAuth metadata and offers dynamic client registration (DCR) or client metadata documents (CIMD), `connect` signs in before it connects: it opens your browser, waits for the sign-in on a loopback address (`http://127.0.0.1:<port>/callback`), and saves the tokens. The system assigns the port when the browser sign-in starts; `dcrAuthenticator: { redirectUri }` pins one instead, and a taken port fails the sign-in at once, before anything is registered. How the client identifies itself is up to you:
 
 - By default it registers itself (DCR) and keeps the registration with the tokens; a registration the server rejects is replaced by a new one. The registration carries a `client_name` only if you pass `dcrAuthenticator: { clientName }`.
 - If you pass `dcrAuthenticator: { clientMetadataUrl }`, the client sends that URL as its `client_id` to servers that accept client metadata documents, and registers on the others. Nothing is registered at a CIMD server and no client secret is stored. A server that offers only CIMD and gets no `clientMetadataUrl` fails with "Incompatible auth server: does not support dynamic client registration".
@@ -200,6 +200,18 @@ Without a `tokenStore`, sign-ins are saved in `.mcp-z/tokens.json` in the workin
 ### Client metadata document
 
 `clientMetadataUrl` must be an https URL, with a path, of a JSON document that you, the application's owner, host and keep at that URL (it is the client's identity at every server). It lists `redirect_uris` `["http://127.0.0.1/callback"]` (the client calls back on a random port, which a server must accept for a loopback address), `token_endpoint_auth_method` `"none"` and `application_type` `"native"`. The server fetches the document, so it must be reachable from the server. Servers built on oauth-google or oauth-microsoft before 2.4.3 advertise CIMD but refuse a redirect on a port the document does not list, so do not pass `clientMetadataUrl` for them: they register.
+
+## Client name and version
+
+The client sends your application's name and version to every server in `initialize`. Set it once on the registry; it applies to every connect the registry makes, including the ones `searchCapabilities` makes:
+
+```ts
+const registry = createServerRegistry(servers, {
+  clientInfo: { name: 'my-application', version: '1.2.3' }
+});
+```
+
+`registry.connect(name, { clientInfo })` overrides the registry's value for that connect. `clientInfo` is the MCP `Implementation`: `name`, `version` and optionally `title`, `websiteUrl` and `icons`, sent as given. Set your own name and its real version: with neither option the client sends `mcp-cli-client` 1.0.0, a legacy fallback that the next major removes (`clientInfo` will then be required).
 
 ## Protocol version negotiation
 

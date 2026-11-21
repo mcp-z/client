@@ -9,6 +9,7 @@ import type { Logger, OAuthFlowOptions } from '@mcp-z/client';
 import { InteractiveOAuthFlow } from '@mcp-z/client';
 import assert from 'assert';
 import getPort from 'get-port';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 
 const ISSUER = 'https://issuer.example.com';
 const RESOURCE = 'https://resource.example.com/mcp';
@@ -20,7 +21,6 @@ interface TokenEndpoint {
 }
 
 async function startTokenEndpoint(): Promise<TokenEndpoint> {
-  const port = await getPort();
   const bodies: URLSearchParams[] = [];
 
   const server = http.createServer((req, res) => {
@@ -35,12 +35,10 @@ async function startTokenEndpoint(): Promise<TokenEndpoint> {
     });
   });
 
-  await new Promise<void>((resolve) => {
-    server.listen(port, () => resolve());
-  });
+  const port = await listenOnFreePort(server, '127.0.0.1');
 
   return {
-    url: `http://localhost:${port}/token`,
+    url: `http://127.0.0.1:${port}/token`,
     bodies,
     close: () =>
       new Promise<void>((resolve) => {
@@ -91,6 +89,29 @@ describe('unit/auth/interactive-oauth-flow', () => {
 
   afterEach(async () => {
     await tokenEndpoint.close();
+  });
+
+  it('performAuthFlow without a port binds an assigned one and carries it in the redirect_uri', async () => {
+    const recorder = createAuthorizeUrlRecorder();
+    const flow = new InteractiveOAuthFlow();
+    const done = flow.performAuthFlow('https://issuer.example.com/authorize', tokenEndpoint.url, 'client-id', 'client-secret', {
+      issuer: ISSUER,
+      resource: RESOURCE,
+      pkce: true,
+      headless: true,
+      allowLoopback: true,
+      timeout: 10000,
+      logger: recorder.logger,
+    });
+    const authorizeUrl = await recorder.authorizeUrl;
+    const redirectUri = authorizeUrl.searchParams.get('redirect_uri') ?? '';
+    assert.ok(/^http:\/\/localhost:[1-9]\d*\/callback$/.test(redirectUri), redirectUri);
+
+    await deliverCallback(redirectUri, { code: 'code_from_browser', iss: ISSUER });
+    const tokens = await done;
+
+    assert.strictEqual(tokens.accessToken, 'access_granted');
+    assert.strictEqual(tokenEndpoint.bodies[0]?.get('redirect_uri'), redirectUri);
   });
 
   async function runFlow(callbackParams: Record<string, string>, overrides: Partial<OAuthFlowOptions> = {}, authorizationEndpoint = 'https://issuer.example.com/authorize', urlPrefix = 'http') {

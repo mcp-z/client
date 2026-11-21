@@ -16,8 +16,8 @@ export interface DcrAuthenticatorOptions {
   tokenStore?: Keyv;
   /** Headless mode (don't open browser) */
   headless?: boolean;
-  /** Required redirect URI for OAuth callback */
-  redirectUri: string;
+  /** Redirect URI to bind for the OAuth callback, exactly: a taken port fails the sign-in at once, before anything is registered. Without it the system assigns a port when the sign-in starts, on 127.0.0.1. */
+  redirectUri?: string;
   /** Optional logger for debug output (defaults to singleton logger) */
   logger?: Logger;
   /**
@@ -53,7 +53,7 @@ export class DcrAuthenticator {
    * @throws Error if authentication fails
    *
    * @example
-   * const authenticator = new DcrAuthenticator({ redirectUri: 'http://127.0.0.1:3000/callback' });
+   * const authenticator = new DcrAuthenticator({ headless: true });
    * const tokens = await authenticator.ensureAuthenticated(
    *   'https://example.com/mcp',
    *   capabilities

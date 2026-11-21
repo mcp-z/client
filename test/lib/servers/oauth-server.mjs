@@ -15,6 +15,8 @@
  * - `separateAuthServer: true` serves the authorization server on its own listener, so it can be down while the MCP endpoint answers (`closeAuthServer()`)
  * - `omitExpiresIn: true` leaves `expires_in` out of token responses; `redirectRegister(url)` answers the registration endpoint with a 307
  * - `sse: true` serves the same tools over SSE at `/sse` (and answers `/mcp` with 404) instead of Streamable HTTP
+ * - `checkRedirectOnRegister: true` makes `/register` GET the origin of each `redirect_uris` entry and record `listening: true|false` beside the registration
+ * - `calls.initialize` lists the `clientInfo` of every authenticated MCP `initialize` request
  * - `calls` records what each endpoint received; `forgetClients()` makes registered clients unknown (invalid_client);
  *   `revokeAll()` makes every issued access and refresh token unknown; `hangTokens(true)` leaves token requests unanswered
  */
@@ -38,7 +40,7 @@ function redirectAllowed(registered, requested) {
 const random = (prefix) => `${prefix}_${randomBytes(12).toString('hex')}`;
 
 /**
- * @param {{ dcr?: boolean, sse?: boolean, separateAuthServer?: boolean, omitExpiresIn?: boolean, state?: 'wrong' | 'missing', resource?: string, issuer?: string, clientAuth?: 'post', noEndpoints?: boolean, tokenRedirectTo?: string, cimd?: { url: string, document: { redirect_uris: string[] } } }} config
+ * @param {{ dcr?: boolean, sse?: boolean, separateAuthServer?: boolean, omitExpiresIn?: boolean, state?: 'wrong' | 'missing', resource?: string, issuer?: string, clientAuth?: 'post', checkRedirectOnRegister?: boolean, noEndpoints?: boolean, tokenRedirectTo?: string, cimd?: { url: string, document: { redirect_uris: string[] } } }} config
  */
 export async function startOAuthServer(config = {}) {
   const { dcr = false, sse = false, cimd } = config;
@@ -59,8 +61,8 @@ export async function startOAuthServer(config = {}) {
   const codes = new Map();
   const accessTokens = new Set();
   const refreshTokens = new Map();
-  /** @type {{ register: number, registrations: Record<string, unknown>[], authorize: { client_id?: string, redirect_uri?: string, resource?: string, scope?: string }[], token: { grant_type?: string, client_id?: string, resource?: string, hung?: boolean, redirected?: boolean, failed?: number }[] }} */
-  const calls = { register: 0, registrations: [], authorize: [], token: [] };
+  /** @type {{ register: number, initialize: { name?: string, version?: string }[], registrations: Record<string, unknown>[], authorize: { client_id?: string, redirect_uri?: string, resource?: string, scope?: string }[], token: { grant_type?: string, client_id?: string, resource?: string, hung?: boolean, redirected?: boolean, failed?: number }[] }} */
+  const calls = { register: 0, registrations: [], authorize: [], token: [], initialize: [] };
 
   asApp.get('/.well-known/oauth-authorization-server', (_req, res) => {
     res.json({
@@ -78,13 +80,25 @@ export async function startOAuthServer(config = {}) {
     res.json({ resource: config.resource ?? `${base}/${req.params.endpoint}`, authorization_servers: [asBase] });
   });
 
-  asApp.post('/register', (req, res) => {
+  /** True when something answers HTTP at the origin of every redirect URI: the callback listener is up. */
+  async function listeningAt(redirectUris) {
+    for (const uri of redirectUris ?? []) {
+      try {
+        await fetch(`${new URL(uri).origin}/`);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  asApp.post('/register', async (req, res) => {
     if (registerRedirectTo) {
       res.redirect(307, registerRedirectTo);
       return;
     }
     calls.register += 1;
-    calls.registrations.push(req.body);
+    calls.registrations.push(config.checkRedirectOnRegister ? { ...req.body, listening: await listeningAt(req.body.redirect_uris) } : req.body);
     const clientId = random('client');
     const clientSecret = random('secret');
     clients.set(clientId, { clientSecret, redirectUris: req.body.redirect_uris ?? [] });
@@ -194,6 +208,10 @@ export async function startOAuthServer(config = {}) {
     res.status(401).json({ error: 'unauthorized' });
   };
 
+  const recordInitialize = (body) => {
+    if (body?.method === 'initialize') calls.initialize.push(body.params?.clientInfo);
+  };
+
   if (sse) {
     const transports = new Map();
     app.get('/sse', requireToken('sse'), async (_req, res) => {
@@ -203,10 +221,12 @@ export async function startOAuthServer(config = {}) {
       await createMcp().connect(transport);
     });
     app.post('/messages', requireToken('sse'), async (req, res) => {
+      recordInitialize(req.body);
       await transports.get(String(req.query.sessionId))?.handlePostMessage(req, res, req.body);
     });
   } else {
     app.post('/mcp', requireToken('mcp'), async (req, res) => {
+      recordInitialize(req.body);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on('close', () => transport.close());
       await createMcp().connect(transport);

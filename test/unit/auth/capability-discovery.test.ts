@@ -8,9 +8,9 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { probeAuthCapabilities } from '@mcp-z/client';
 import assert from 'assert';
-import getPort from 'get-port';
 import { probeAuthCapabilities as probeAuthCapabilitiesFromSource } from '../../../src/auth/capability-discovery.ts';
 import { withAbortTimeout } from '../../../src/connection/connect-client.ts';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 import { withDeadline } from '../../lib/with-deadline.ts';
 
@@ -33,8 +33,7 @@ describe('unit/auth/capability-discovery', () => {
     const server = http.createServer(() => {
       requestCount += 1;
     });
-    const port = await getPort({ host: '127.0.0.1' });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const port = await listenOnFreePort(server, '127.0.0.1');
     const controller = new AbortController();
     const reason = new Error('discovery cancelled before it started');
     controller.abort(reason);
@@ -58,8 +57,7 @@ describe('unit/auth/capability-discovery', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort({ host: '127.0.0.1' });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const port = await listenOnFreePort(server, '127.0.0.1');
     const controller = new AbortController();
     const reason = new Error('resource discovery cancelled');
 
@@ -84,8 +82,7 @@ describe('unit/auth/capability-discovery', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort({ host: '127.0.0.1' });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const port = await listenOnFreePort(server, '127.0.0.1');
 
     try {
       const pending = withAbortTimeout((signal) => probeAuthCapabilitiesFromSource(`http://127.0.0.1:${port}/mcp`, { signal }), 250, 'local capability discovery');

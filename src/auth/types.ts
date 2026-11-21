@@ -168,13 +168,13 @@ export interface DcrRegistrationOptions {
 export interface OAuthFlowOptions {
   /** Cancels an in-progress authorization and closes its callback listener. */
   signal?: AbortSignal;
-  /** Port for OAuth callback listener (required - use get-port to find available port) */
-  port: number;
+  /** Port for the OAuth callback listener. Without it the system assigns one when the flow starts. */
+  port?: number;
   /** Issuer identifier discovered before the flow starts; the `iss` in the authorization response must match it (RFC 9207) */
   issuer: string;
   /** Canonical resource server URI, sent as `resource` on the authorization, token, and refresh requests (RFC 8707) */
   resource: string;
-  /** Redirect URI for OAuth callback (optional - will be built from port if not provided) */
+  /** Redirect URI for OAuth callback (optional - will be built from the bound port if not provided) */
   redirectUri?: string;
   /** OAuth scopes to request */
   scopes?: string[];

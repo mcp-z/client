@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as process from 'process';
 import { decorateClient, type ManagedClient } from '../client-helpers.ts';
 import { validateServers } from '../config/validate-config.ts';
-import { connectMcpClient } from '../connection/connect-client.ts';
+import { type ClientInfo, connectMcpClient } from '../connection/connect-client.ts';
 import type { DcrAuthenticatorOptions } from '../dcr/dcr-authenticator.ts';
 import { buildCapabilityIndex, type CapabilityClient, searchCapabilities as executeCapabilitySearch, type SearchOptions, type SearchResponse } from '../search/index.ts';
 import type { McpServerEntry, StartConfig, StopCommandConfig, TransportType } from '../types.ts';
@@ -80,6 +80,13 @@ export interface CreateServerRegistryOptions {
    * @default ['servers']
    */
   dialects?: Dialect[];
+
+  /**
+   * What every connect this registry makes sends to the server in `initialize` (`name`, `version` and optionally `title`, `websiteUrl`, `icons`), including the connects
+   * `searchCapabilities` makes. The `clientInfo` of a single `connect` overrides it. Set your application's own name and real version.
+   * Legacy fallback: with neither, the client sends `mcp-cli-client` 1.0.0, and the next major removes that fallback and requires one.
+   */
+  clientInfo?: ClientInfo;
 }
 
 /**
@@ -245,10 +252,10 @@ export interface ServerRegistry {
    * The connected client is automatically tracked for close.
    *
    * @param name - Server name from configuration
-   * @param options - Authentication, logging, and protocol negotiation options
+   * @param options - Authentication, logging, protocol negotiation, and `clientInfo` (the name and version sent to the server; legacy fallback `mcp-cli-client` 1.0.0, removed by the next major, so set your own)
    * @returns Connected MCP SDK Client
    */
-  connect: (name: string, options?: { dcrAuthenticator?: Partial<DcrAuthenticatorOptions>; logger?: Logger; versionNegotiation?: VersionNegotiationOptions }) => Promise<ManagedClient>;
+  connect: (name: string, options?: { dcrAuthenticator?: Partial<DcrAuthenticatorOptions>; logger?: Logger; versionNegotiation?: VersionNegotiationOptions; clientInfo?: ClientInfo }) => Promise<ManagedClient>;
 
   /**
    * Close all clients and servers gracefully.
@@ -424,7 +431,9 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
   }
 
   // Connect internally, then track each returned lease for registry shutdown.
-  const connectInternal = async (name: string, options?: RegistryConnectOptions): Promise<ManagedClient> => {
+  const connectInternal = async (name: string, connectOptions?: RegistryConnectOptions): Promise<ManagedClient> => {
+    const clientInfo = connectOptions?.clientInfo ?? options?.clientInfo;
+    const connectingOptions: RegistryConnectOptions | undefined = clientInfo ? { ...connectOptions, clientInfo } : connectOptions;
     const serverEntry = serversConfig[name];
     if (!serverEntry) {
       const available = Object.keys(serversConfig).join(', ');
@@ -446,7 +455,7 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
           entry.connecting = (async () => {
             // Pass minimal RegistryLike object to connectMcpClient
             const registryLike = { config: serversConfig, servers };
-            const rawClient = await connectMcpClient(registryLike, name, { ...options, signal: closeAbortController.signal });
+            const rawClient = await connectMcpClient(registryLike, name, { ...connectingOptions, signal: closeAbortController.signal });
             const decorated = decorateClient(rawClient, { serverName: name });
             entry.client = decorated;
             entry.connecting = undefined;
@@ -501,7 +510,7 @@ export function createServerRegistry(serversConfig: ServersConfig, options?: Cre
 
     // Pass minimal RegistryLike object to connectMcpClient
     const registryLike = { config: serversConfig, servers };
-    const rawClient = await connectMcpClient(registryLike, name, { ...options, signal: closeAbortController.signal });
+    const rawClient = await connectMcpClient(registryLike, name, { ...connectingOptions, signal: closeAbortController.signal });
     const decorated = decorateClient(rawClient, { serverName: name });
     clients.add(decorated);
     return decorated;

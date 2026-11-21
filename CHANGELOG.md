@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.7.0] - 2026-11-20
+
+### Added
+
+- `clientInfo` option on `createServerRegistry` and `registry.connect`: what the client sends to the server in `initialize` (the MCP `Implementation`: `name`, `version` and optionally `title`, `websiteUrl`, `icons`, sent as given). The registry's value applies to every connect it makes, including the ones `searchCapabilities` makes; the `clientInfo` of a `connect` overrides it. Set your application's own name and its real version. With neither the client still sends `mcp-cli-client` 1.0.0; that legacy fallback is removed by the next major, which will require the option.
+- `DcrAuthenticator`, `OAuthCallbackListener` and `InteractiveOAuthFlow` no longer need a port or redirect URI: leave `dcrAuthenticator.redirectUri`, `OAuthCallbackListenerOptions.port` or `OAuthFlowOptions.port` out and the system assigns one when the sign-in starts. Passing one binds exactly that.
+
+### Changed
+
+- A taken callback port now fails with `Sign-in callback port <host>:<port> is already in use (EADDRINUSE)`, raised by `OAuthCallbackListener.start()`, instead of Node's raw `listen EADDRINUSE`. A `dcrAuthenticator.redirectUri` you pass fails the sign-in with it at once, before a client is registered (before, the failure came after a registration). It also reaches `InteractiveOAuthFlow` given a `port` and any direct `OAuthCallbackListener` caller with a fixed port. The error keeps `code` `EADDRINUSE`; Node's original error (`errno`, `syscall`, `address`, `port`) is on `cause`.
+
+### Fixed
+
+- A sign-in can no longer fail with `listen EADDRINUSE` because another program took the callback port after the client picked it: the callback is bound first and the redirect URI is built from the bound port. Before, that failure came after a client had been registered at the server, and that registration could never be used.
+- A 401 after connect no longer registers unused clients at the server.
+
 ## [2.6.0] - 2026-11-20
 
 ### Security

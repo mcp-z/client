@@ -9,10 +9,11 @@ import { type AuthProvider, auth, type FetchLike, UnauthorizedError, validateCli
 import type Keyv from 'keyv';
 import createStore, { migrateKeyv5Keys } from 'keyv-registry';
 import { discoveryFetch, isLoopbackUrl } from '../auth/discovery-fetch.ts';
+import { OAuthCallbackListener } from '../auth/oauth-callback-listener.ts';
 import type { Failure } from '../auth/oauth-provider.ts';
 import { StoreOAuthProvider } from '../auth/oauth-provider.ts';
 import type { AuthCapabilities, TokenSet } from '../auth/types.ts';
-import { DEFAULT_STORE_DIR, DEFAULT_STORE_FILE, SHARED_FILE_PROTOCOL } from '../constants.ts';
+import { DEFAULT_STORE_DIR, DEFAULT_STORE_FILE, SHARED_FILE_PROTOCOL, UNBOUND_CALLBACK_URL } from '../constants.ts';
 import { normalizeUrl } from '../lib/url-utils.ts';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import type { DcrAuthenticatorOptions } from './dcr-authenticator.ts';
@@ -60,7 +61,8 @@ interface Started {
 export class SignIn {
   private tokenStore!: Keyv;
   private headless: boolean;
-  private redirectUri: string;
+  /** The caller's redirect URI, bound exactly. Without it each browser sign-in binds a port the system assigns. */
+  private redirectUri?: string;
   private clientMetadataUrl?: string;
   private clientName?: string;
   /** True while a connect is under way, the only time a transport may start a browser sign-in. */
@@ -123,7 +125,7 @@ export class SignIn {
    * @throws Error if authentication fails
    *
    * @example
-   * const authenticator = new DcrAuthenticator({ redirectUri: 'http://127.0.0.1:3000/callback' });
+   * const authenticator = new DcrAuthenticator({ headless: true });
    * const tokens = await authenticator.ensureAuthenticated(
    *   'https://example.com/mcp',
    *   capabilities
@@ -185,13 +187,14 @@ export class SignIn {
     await pending?.provider.close();
   }
 
-  private newProvider(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal, failure?: Failure, interactive = true): StoreOAuthProvider {
+  private newProvider(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal, failure?: Failure, interactive = true, callback?: { redirectUrl: string; listener: OAuthCallbackListener }): StoreOAuthProvider {
     const storeKey = normalizeUrl(mcpServerUrl);
     return new StoreOAuthProvider({
       store: this.tokenStore,
       issuer: requireIssuer(capabilities),
       storeKey,
-      redirectUrl: this.redirectUri,
+      redirectUrl: callback?.redirectUrl ?? this.redirectUri ?? UNBOUND_CALLBACK_URL,
+      listener: callback?.listener,
       clientMetadataUrl: this.clientMetadataUrl,
       clientName: this.clientName,
       interactive,
@@ -210,24 +213,53 @@ export class SignIn {
     return this.finish(await this.start(mcpServerUrl, capabilities, signal));
   }
 
-  /** Runs auth() up to the browser step: AUTHORIZED when a refresh was enough, REDIRECT when the user has to sign in. */
+  /**
+   * Runs auth() up to the browser step: AUTHORIZED when a refresh was enough, REDIRECT when the user has to sign in.
+   * A refresh runs first, with no callback listener. Only a browser sign-in binds one, before auth() registers a client or builds the authorization URL.
+   */
   private async start(mcpServerUrl: string, capabilities: AuthCapabilities, signal?: AbortSignal, interactive = true): Promise<Started> {
     if (!capabilities.authorizationEndpoint || !capabilities.tokenEndpoint) {
       throw new Error('Server does not provide required OAuth endpoints');
     }
 
     const failure: Failure = {};
-    const provider = this.newProvider(mcpServerUrl, capabilities, signal, failure, interactive);
     // Loopback trust for every fetch below is computed from the server we're talking to, never from capabilities' endpoints (see discovery-fetch.ts).
     const options = { serverUrl: mcpServerUrl, fetchFn: guardedFetch(isLoopbackUrl(mcpServerUrl), signal, failure), ...(capabilities.scopes && { scope: capabilities.scopes.join(' ') }) };
+
+    if (!interactive || (await this.newProvider(mcpServerUrl, capabilities, signal).loadTokenSet())?.refreshToken) {
+      const provider = this.newProvider(mcpServerUrl, capabilities, signal, failure, false);
+      try {
+        return { provider, options, signal, result: await auth(provider, options) };
+      } catch (error) {
+        // The refresh was not enough and a browser sign-in is allowed: go on to it.
+        if (!(interactive && UnauthorizedError.isInstance(error))) return this.failed(error, signal);
+      }
+    }
+    return this.startBrowserSignIn(mcpServerUrl, capabilities, options, failure, signal);
+  }
+
+  private async startBrowserSignIn(mcpServerUrl: string, capabilities: AuthCapabilities, options: Started['options'], failure: Failure, signal?: AbortSignal): Promise<Started> {
+    throwIfAborted(signal);
+    const listener = this.redirectUri ? callbackListenerFor(this.redirectUri, this.logger) : new OAuthCallbackListener({ host: '127.0.0.1', logger: this.logger });
     try {
+      await listener.start();
+    } catch (error) {
+      return this.failed(error, signal);
+    }
+    try {
+      const provider = this.newProvider(mcpServerUrl, capabilities, signal, failure, true, { redirectUrl: this.redirectUri ?? listener.getCallbackUrl(), listener });
       return { provider, options, signal, result: await auth(provider, options) };
     } catch (error) {
-      await provider.close();
-      throwIfAborted(signal);
-      this.logger.error('❌ Sign-in failed:', error instanceof Error ? error.message : String(error));
-      throw error;
+      // The provider owns the listener and stops it on close; stopping the listener directly is the same and works before the provider exists.
+      await listener.stop();
+      return this.failed(error, signal);
     }
+  }
+
+  private failed(error: unknown, signal?: AbortSignal): never {
+    throwIfAborted(signal);
+    this.logger.error('❌ Sign-in failed:', error instanceof Error ? error.message : String(error));
+    throw error;
   }
 
   /** Waits for the user's sign-in if there is one to wait for, redeems it, and returns what is stored. */
@@ -271,6 +303,13 @@ export class SignIn {
     }
     this.logger.debug(`🗑️  Deleted tokens for ${mcpServerUrl}`);
   }
+}
+
+/** A listener for the host and port of a redirect URI the caller chose. */
+function callbackListenerFor(redirectUri: string, logger: Logger): OAuthCallbackListener {
+  const redirect = new URL(redirectUri);
+  const port = Number.parseInt(redirect.port, 10) || (redirect.protocol === 'https:' ? 443 : 80);
+  return new OAuthCallbackListener({ port, host: redirect.hostname.replace(/^\[|\]$/g, ''), logger });
 }
 
 /** Every request auth() makes goes through the SSRF guard, with the caller's cancellation. A request that fails is remembered, see {@link Failure}. */

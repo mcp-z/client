@@ -32,22 +32,19 @@ export class InteractiveOAuthFlow {
    * @param tokenEndpoint - OAuth token endpoint URL
    * @param clientId - OAuth client ID
    * @param clientSecret - OAuth client secret
-   * @param options - Flow options (port is required - use get-port to find available port)
+   * @param options - Flow options (`port` is optional: the system assigns one when the flow starts)
    * @returns Token set with access and refresh tokens
    *
    * @throws Error if flow fails or times out
    *
    * @example
-   * import getPort from 'get-port';
-   *
    * const flow = new InteractiveOAuthFlow();
-   * const port = await getPort({ host: 'localhost' });
    * const tokens = await flow.performAuthFlow(
    *   'https://example.com/oauth/authorize',
    *   'https://example.com/oauth/token',
    *   'client-id',
    *   'client-secret',
-   *   { port, issuer: 'https://example.com', resource: 'https://example.com/mcp', scopes: ['read', 'write'] }
+   *   { issuer: 'https://example.com', resource: 'https://example.com/mcp', scopes: ['read', 'write'] }
    * );
    */
   async performAuthFlow(authorizationEndpoint: string, tokenEndpoint: string, clientId: string, clientSecret: string, options: OAuthFlowOptions): Promise<TokenSet> {
@@ -67,7 +64,7 @@ export class InteractiveOAuthFlow {
       await callbackListener.start();
 
       // Build redirect URI
-      const redirectUri = options.redirectUri || `http://localhost:${options.port}/callback`;
+      const redirectUri = options.redirectUri || callbackListener.getCallbackUrl();
 
       // Build authorization URL
       const authUrl = new URL(authorizationEndpoint);

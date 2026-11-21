@@ -11,7 +11,7 @@ import type { AuthorizationServerMetadata, OAuthClientMetadata, OAuthClientProvi
 import { UnauthorizedError } from '@modelcontextprotocol/client';
 import type Keyv from 'keyv';
 import type { Logger } from '../utils/logger.ts';
-import { OAuthCallbackListener } from './oauth-callback-listener.ts';
+import type { OAuthCallbackListener } from './oauth-callback-listener.ts';
 import { presentAuthorizationUrl } from './present-authorization-url.ts';
 import type { AuthCapabilities, CallbackResult, TokenSet } from './types.ts';
 
@@ -30,6 +30,8 @@ export interface StoreOAuthProviderOptions {
   /** Identifies the server in store keys: its configured URL, normalized. */
   storeKey: string;
   redirectUrl: string;
+  /** The bound callback listener of a browser sign-in. Without one the provider cannot send the user to a browser; {@link StoreOAuthProvider.close} stops it. */
+  listener?: OAuthCallbackListener;
   /** Name registered under (DCR); left out of the registration when unset. */
   clientName?: string;
   /** False once connected: a new sign-in then fails with UnauthorizedError instead of opening a browser nobody is watching. */
@@ -53,7 +55,6 @@ export class StoreOAuthProvider implements OAuthClientProvider {
   private readonly clientKey: string;
   private verifier?: string;
   private expectedState?: string;
-  private listener?: OAuthCallbackListener;
   private callback?: Promise<CallbackResult>;
   /** Set when a non-interactive provider has had its credentials invalidated: nothing may be registered or asked any more. */
   private mustSignInAgain = false;
@@ -123,6 +124,8 @@ export class StoreOAuthProvider implements OAuthClientProvider {
     }
 
     if (signIn?.clientId && canRefresh) return { client_id: signIn.clientId, ...(signIn.clientSecret && { client_secret: signIn.clientSecret }), issuer: this.options.issuer };
+    // A provider that may not open a browser has no use for a new registration.
+    if (!this.options.interactive) throw new UnauthorizedError('Signing in again is needed; connect again to sign in');
     return undefined;
   }
 
@@ -171,17 +174,13 @@ export class StoreOAuthProvider implements OAuthClientProvider {
     return this.verifier;
   }
 
-  /** Binds the callback listener, then shows the user the URL; {@link awaitCallback} returns what the listener received. */
+  /** Shows the user the URL once the callback is awaited; {@link awaitCallback} returns what the listener received. */
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     // auth() answers a refresh that could not reach the server with a new authorization request. Nobody can complete that, and the stored sign-in stays as it is.
     if (this.options.failure?.error !== undefined) throw this.options.failure.error;
-    if (!this.options.interactive) throw new UnauthorizedError('Signing in again is needed; connect again to sign in');
-    const redirect = new URL(this.options.redirectUrl);
-    const port = Number.parseInt(redirect.port, 10) || (redirect.protocol === 'https:' ? 443 : 80);
-    const listener = new OAuthCallbackListener({ port, host: redirect.hostname.replace(/^\[|\]$/g, ''), logger: this.options.logger });
-    this.listener = listener;
+    const listener = this.options.listener;
+    if (!this.options.interactive || !listener) throw new UnauthorizedError('Signing in again is needed; connect again to sign in');
     try {
-      await listener.start();
       // Registered before the URL is shown, so a callback cannot arrive unobserved.
       this.callback = listener.waitForCallback(this.options.headless ? HEADLESS_CALLBACK_TIMEOUT_MS : CALLBACK_TIMEOUT_MS, this.options.signal);
       this.callback.catch(() => {});
@@ -228,9 +227,7 @@ export class StoreOAuthProvider implements OAuthClientProvider {
   }
 
   async close(): Promise<void> {
-    const listener = this.listener;
-    this.listener = undefined;
-    await listener?.stop();
+    await this.options.listener?.stop();
   }
 }
 

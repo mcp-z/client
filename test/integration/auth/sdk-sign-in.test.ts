@@ -17,6 +17,7 @@ import { probeAuthCapabilities } from '../../../src/auth/index.ts';
 import type { TokenSet } from '../../../src/auth/types.ts';
 import { connectMcpClient } from '../../../src/connection/connect-client.ts';
 import { DcrAuthenticator, DynamicClientRegistrar } from '../../../src/dcr/index.ts';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 import { startOAuthServer } from '../../lib/servers/oauth-server.mjs';
 import waitFor from '../../lib/wait-for.ts';
 
@@ -784,3 +785,139 @@ async function newAuthenticator(server: Server, store: Keyv): Promise<DcrAuthent
   const port = await getPort({ host: '127.0.0.1' });
   return new DcrAuthenticator({ tokenStore: store, headless: true, redirectUri: `http://127.0.0.1:${port}/callback`, logger: consentLogger(server.base) });
 }
+
+/** Holds a port on 127.0.0.1 for as long as the test needs it taken. */
+async function holdPort(): Promise<{ port: number; release: () => Promise<void> }> {
+  const squatter = http.createServer();
+  const port = await listenOnFreePort(squatter, '127.0.0.1');
+  return {
+    port,
+    release: () =>
+      new Promise<void>((resolve) => {
+        squatter.closeAllConnections();
+        squatter.close(() => resolve());
+      }),
+  };
+}
+
+const LISTENER_LINE = 'Callback server listening';
+const listenerLines = (debug: string[]) => debug.filter((message) => message.includes(LISTENER_LINE)).length;
+const portOf = (uri: unknown) => new URL(String(uri)).port;
+
+describe('integration/auth/sdk-sign-in: the callback port is bound before anything is registered', () => {
+  it('has the callback listening when the redirect URI reaches the registration endpoint', async () => {
+    await withServer({ dcr: true, checkRedirectOnRegister: true }, async (server) => {
+      const client = await connect(server, new Keyv());
+      await client.close();
+
+      assert.strictEqual(server.calls.registrations.length, 1);
+      assert.strictEqual(server.calls.registrations[0]?.listening, true);
+    });
+  });
+
+  it('fails a taken caller-supplied port plainly, before anything is registered', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const held = await holdPort();
+      try {
+        const store = new Keyv();
+        const authenticator = new DcrAuthenticator({ tokenStore: store, headless: true, redirectUri: `http://127.0.0.1:${held.port}/callback`, logger: consentLogger(server.base) });
+
+        await assert.rejects(authenticator.ensureAuthenticated(server.mcpUrl, await probeAuthCapabilities(server.mcpUrl)), (error: Error) => {
+          assert.strictEqual(error.message, `Sign-in callback port 127.0.0.1:${held.port} is already in use (EADDRINUSE)`);
+          return true;
+        });
+
+        assert.strictEqual(server.calls.register, 0);
+        assert.ok(!Object.keys(await entries(store)).some((key) => key.startsWith('client:')));
+      } finally {
+        await held.release();
+      }
+    });
+  });
+
+  it('assigns the port when the caller gives no redirect URI', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const authenticator = new DcrAuthenticator({ tokenStore: new Keyv(), headless: true, logger: consentLogger(server.base) });
+      await authenticator.ensureAuthenticated(server.mcpUrl, await probeAuthCapabilities(server.mcpUrl));
+
+      assert.match(String((server.calls.registrations[0]?.redirect_uris as string[] | undefined)?.[0]), /^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+    });
+  });
+
+  it('never gives two concurrent sign-ins the same port', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const capabilities = await probeAuthCapabilities(server.mcpUrl);
+      const make = () => new DcrAuthenticator({ tokenStore: new Keyv(), headless: true, logger: consentLogger(server.base) });
+
+      await Promise.all([make().ensureAuthenticated(server.mcpUrl, capabilities), make().ensureAuthenticated(server.mcpUrl, capabilities)]);
+
+      const ports = server.calls.authorize.map((call) => portOf(call.redirect_uri));
+      assert.strictEqual(ports.length, 2);
+      assert.notStrictEqual(ports[0], ports[1]);
+    });
+  });
+
+  it('starts no listener for a refresh', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const watch = watchedLogger(server.base);
+      const store = new Keyv();
+      const capabilities = await probeAuthCapabilities(server.mcpUrl);
+      const authenticator = new DcrAuthenticator({ tokenStore: store, headless: true, logger: watch.logger });
+      await authenticator.ensureAuthenticated(server.mcpUrl, capabilities);
+      await expire(store);
+      const listenersBefore = listenerLines(watch.debug);
+      const authorizeBefore = server.calls.authorize.length;
+
+      await authenticator.ensureAuthenticated(server.mcpUrl, capabilities);
+
+      assert.strictEqual(listenerLines(watch.debug), listenersBefore, 'no callback listener was started');
+      assert.strictEqual(server.calls.authorize.length, authorizeBefore, 'no authorization request');
+      assert.strictEqual(server.calls.token.filter((call) => call.grant_type === 'refresh_token').length, 1);
+    });
+  });
+
+  it('registers nothing on a 401 after connect, for a stored sign-in with no refresh token', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const watch = watchedLogger(server.base);
+      const store = new Keyv();
+      const capabilities = await probeAuthCapabilities(server.mcpUrl);
+      const registration = await fetch(`${server.base}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: ['http://127.0.0.1:1/callback'] }) });
+      const registered = (await registration.json()) as { client_id: string; client_secret: string };
+      const issued = server.issueTokens(registered.client_id);
+      await store.set(`client:${capabilities.issuer}:${server.mcpUrl}`, { client_id: registered.client_id, client_secret: registered.client_secret, redirect_uris: ['http://127.0.0.1:1/callback'] });
+      await store.set(tokenKey(capabilities.issuer, server.mcpUrl), { accessToken: issued.accessToken, refreshToken: '', expiresAt: Date.now() + 3600000, clientId: registered.client_id, clientSecret: registered.client_secret, issuer: capabilities.issuer } satisfies TokenSet);
+      const client = await connectWatched(server, store, watch.logger);
+      try {
+        const registeredBefore = server.calls.register;
+        const listenersBefore = listenerLines(watch.debug);
+        server.revokeAll();
+
+        await assert.rejects(client.listTools(), (error: unknown) => UnauthorizedError.isInstance(error));
+
+        assert.strictEqual(server.calls.register, registeredBefore);
+        assert.strictEqual(listenerLines(watch.debug), listenersBefore, 'no callback listener was started');
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
+  it('signs in on a new port when a 401 during connect needs a second sign-in', async () => {
+    await withServer({ dcr: true }, async (server) => {
+      const watch = watchedLogger(server.base);
+      // The server forgets every token once the first sign-in is complete, so the connect itself is answered 401.
+      const logger = {
+        ...watch.logger,
+        debug: (message: unknown) => {
+          watch.logger.debug(message);
+          if (typeof message === 'string' && message.includes('Authentication complete')) server.revokeAll();
+        },
+      };
+      const client = await connectMcpClient({ srv: { type: 'http', url: server.mcpUrl } }, 'srv', { logger, dcrAuthenticator: { tokenStore: new Keyv(), headless: true, logger } });
+      await client.close();
+
+      assert.strictEqual(server.calls.authorize.length, 2, 'signed in twice');
+      assert.notStrictEqual(portOf(server.calls.authorize[0]?.redirect_uri), portOf(server.calls.authorize[1]?.redirect_uri));
+    });
+  });
+});

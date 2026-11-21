@@ -8,6 +8,7 @@ import http from 'node:http';
 import { OAuthCallbackListener } from '@mcp-z/client';
 import assert from 'assert';
 import getPort from 'get-port';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 
 describe('unit/auth/oauth-callback-listener', () => {
   it('should start on provided port', async () => {
@@ -21,13 +22,9 @@ describe('unit/auth/oauth-callback-listener', () => {
   });
 
   it('should fail fast when port is already in use', async () => {
-    const port = await getPort({ host: 'localhost' });
-
-    // Block the port
+    // Block the port on the host the listener binds
     const blockingServer = http.createServer();
-    await new Promise<void>((resolve) => {
-      blockingServer.listen(port, 'localhost', () => resolve());
-    });
+    const port = await listenOnFreePort(blockingServer, 'localhost');
 
     try {
       const listener = new OAuthCallbackListener({ port });
@@ -90,6 +87,40 @@ describe('unit/auth/oauth-callback-listener', () => {
     });
 
     await listener.stop();
+  });
+
+  it('binds a port the system assigns when none is given', async () => {
+    const listener = new OAuthCallbackListener({ host: '127.0.0.1' });
+    await listener.start();
+    try {
+      const match = /^http:\/\/127\.0\.0\.1:(\d+)\/callback$/.exec(listener.getCallbackUrl());
+      assert.ok(match, listener.getCallbackUrl());
+      assert.ok(Number(match[1]) > 0);
+
+      const callback = listener.waitForCallback();
+      const response = await fetch(`${listener.getCallbackUrl()}?code=x`);
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual((await callback).code, 'x');
+    } finally {
+      await listener.stop();
+    }
+  });
+
+  it('names the port when it is already in use', async () => {
+    const blockingServer = http.createServer();
+    const port = await listenOnFreePort(blockingServer, '127.0.0.1');
+    try {
+      const listener = new OAuthCallbackListener({ port, host: '127.0.0.1' });
+
+      await assert.rejects(listener.start(), (error: Error) => {
+        assert.strictEqual(error.message, `Sign-in callback port 127.0.0.1:${port} is already in use (EADDRINUSE)`);
+        assert.strictEqual((error as NodeJS.ErrnoException).code, 'EADDRINUSE');
+        assert.strictEqual((error.cause as NodeJS.ErrnoException | undefined)?.code, 'EADDRINUSE');
+        return true;
+      });
+    } finally {
+      await new Promise<void>((resolve) => blockingServer.close(() => resolve()));
+    }
   });
 
   it('should timeout when no callback received', async () => {

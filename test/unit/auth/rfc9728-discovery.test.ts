@@ -11,6 +11,7 @@ import express from 'express';
 import getPort from 'get-port';
 import { DiscoveryFetchError, speculativeProbe } from '../../../src/auth/discovery-fetch.ts';
 import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from '../../../src/auth/rfc9728-discovery.ts';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 async function withHttpServer(handler: http.RequestListener, run: (base: string) => Promise<void>): Promise<void> {
@@ -24,8 +25,10 @@ async function withHttpServer(handler: http.RequestListener, run: (base: string)
   }
 }
 
-async function startPathPrefixedWellKnownServer(config: { port: number; baseUrl: string; prefix: string }) {
-  const { port, baseUrl, prefix } = config;
+async function startPathPrefixedWellKnownServer(config: { host: string; prefix: string }) {
+  const { host, prefix } = config;
+  // Assigned once the server is listening; handlers only run after that.
+  let baseUrl = '';
   const app = express();
 
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {
@@ -64,13 +67,10 @@ async function startPathPrefixedWellKnownServer(config: { port: number; baseUrl:
     });
   });
 
-  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-    const httpServer = app.listen(port, () => {
-      resolve(httpServer);
-    });
-    httpServer.keepAliveTimeout = 0;
-    httpServer.headersTimeout = 0;
-  });
+  const server = http.createServer(app);
+  server.keepAliveTimeout = 0;
+  server.headersTimeout = 0;
+  baseUrl = `http://${host}:${await listenOnFreePort(server, host)}`;
 
   return {
     url: baseUrl,
@@ -308,13 +308,11 @@ describe('unit/auth/rfc9728-discovery', () => {
     });
 
     it('should prefer path-local well-known for prefixed deployments', async () => {
-      const port = await getPort();
-      const baseUrl = `http://localhost:${port}`;
       const server = await startPathPrefixedWellKnownServer({
-        port,
-        baseUrl,
+        host: '127.0.0.1',
         prefix: '/outlook',
       });
+      const baseUrl = server.url;
 
       try {
         const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/outlook`);
@@ -327,13 +325,11 @@ describe('unit/auth/rfc9728-discovery', () => {
     });
 
     it('should ignore query and fragment when probing path-local well-known', async () => {
-      const port = await getPort();
-      const baseUrl = `http://localhost:${port}`;
       const server = await startPathPrefixedWellKnownServer({
-        port,
-        baseUrl,
+        host: '127.0.0.1',
         prefix: '/outlook',
       });
+      const baseUrl = server.url;
 
       try {
         const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/outlook?foo=bar#baz`);
@@ -433,13 +429,11 @@ describe('unit/auth/rfc9728-discovery', () => {
     });
 
     it('should prefer path-local authorization server metadata', async () => {
-      const port = await getPort();
-      const baseUrl = `http://localhost:${port}`;
       const server = await startPathPrefixedWellKnownServer({
-        port,
-        baseUrl,
+        host: '127.0.0.1',
         prefix: '/outlook',
       });
+      const baseUrl = server.url;
 
       try {
         const metadata = await discoverAuthorizationServerMetadata(`${baseUrl}/outlook`, { allowLoopback: true });

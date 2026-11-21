@@ -9,13 +9,13 @@ import '../../lib/env-loader.ts';
 import http from 'node:http';
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, type Transport } from '@modelcontextprotocol/client';
 import assert from 'assert';
-import getPort from 'get-port';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { ManagedClient } from '../../../src/client-helpers.ts';
 import { connectMcpClient, connectTransportWithTimeout } from '../../../src/connection/connect-client.ts';
 import type { ServerRegistry, ServersConfig } from '../../../src/index.ts';
 import { createServerRegistry } from '../../../src/spawn/spawn-servers.ts';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 import { withDeadline } from '../../lib/with-deadline.ts';
 
 // ES module equivalent of __dirname
@@ -222,8 +222,7 @@ describe('registry.connect', () => {
       requestSeen();
       request.socket.once('close', socketClosed);
     });
-    const port = await getPort({ host: '127.0.0.1' });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const port = await listenOnFreePort(server, '127.0.0.1');
     const controller = new AbortController();
     const reason = new Error('connection setup cancelled');
 
@@ -269,8 +268,7 @@ describe('registry.connect', () => {
       }
       response.writeHead(404).end();
     });
-    const port = await getPort({ host: '127.0.0.1' });
-    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const port = await listenOnFreePort(server, '127.0.0.1');
     const controller = new AbortController();
     const abortError = new Error('connection setup cancelled');
     const cleanupError = new Error('streamable transport cleanup failed');
@@ -313,8 +311,7 @@ describe('registry.connect', () => {
         request.socket.once('close', socketClosed);
         requestSeen();
       });
-      const port = await getPort({ host: '127.0.0.1' });
-      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+      const port = await listenOnFreePort(server, '127.0.0.1');
       const url = new URL(`http://127.0.0.1:${port}/mcp`);
       const client = new Client({ name: 'connection-deadline-test', version: '1.0.0' }, { capabilities: {} });
 

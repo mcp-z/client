@@ -4,12 +4,13 @@
  */
 
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { logger as defaultLogger, type Logger } from '../utils/logger.ts';
 import type { CallbackResult } from './types.ts';
 
 export interface OAuthCallbackListenerOptions {
-  /** Port to listen on (required - use get-port package to find available port) */
-  port: number;
+  /** Port to bind exactly. Left out (or 0), the system assigns one when the listener starts; {@link OAuthCallbackListener.getCallbackUrl} then reports it. */
+  port?: number;
   /** Host to bind and to report in the callback URL (defaults to `localhost`). Use the host of the redirect URI the authorization server was given. */
   host?: string;
   /** Optional logger for debug output (defaults to singleton logger) */
@@ -19,15 +20,13 @@ export interface OAuthCallbackListenerOptions {
 /**
  * OAuthCallbackListener handles OAuth redirect callbacks
  * Starts a temporary HTTP server to receive authorization code
- *
- * Note: Caller is responsible for finding an available port using get-port package
  */
 export class OAuthCallbackListener {
   private server: http.Server | undefined;
   private resolveCallback?: (result: CallbackResult) => void;
   private rejectCallback?: (error: Error) => void;
   private timeout: NodeJS.Timeout | undefined;
-  private port: number;
+  private port: number | undefined;
   private host: string;
   private logger: Logger;
 
@@ -39,28 +38,27 @@ export class OAuthCallbackListener {
 
   /**
    * Start the callback server
-   * Fails fast if port is already in use - caller should use get-port to find available port
+   * Binds the given port, or one the system assigns when none was given. A port that is taken fails at once, naming it.
    */
   async start(): Promise<void> {
-    await this.listen(this.port);
+    this.port = await this.listen(this.port ?? 0);
     this.logger.debug(`✅ Callback server listening on http://${this.host}:${this.port}/callback`);
   }
 
-  /**
-   * Listen on a specific port
-   */
-  private listen(port: number): Promise<void> {
+  /** Listens on the port (0 for an assigned one) and returns the port bound. */
+  private listen(port: number): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server = http.createServer((req, res) => {
+      const server = http.createServer((req, res) => {
         this.handleRequest(req, res);
       });
+      this.server = server;
 
-      this.server.on('error', (error) => {
-        reject(error);
+      server.on('error', (error: NodeJS.ErrnoException) => {
+        reject(error.code === 'EADDRINUSE' ? Object.assign(new Error(`Sign-in callback port ${this.host}:${port} is already in use (EADDRINUSE)`, { cause: error }), { code: error.code }) : error);
       });
 
-      this.server.listen(port, this.host, () => {
-        resolve();
+      server.listen(port, this.host, () => {
+        resolve((server.address() as AddressInfo).port);
       });
     });
   }

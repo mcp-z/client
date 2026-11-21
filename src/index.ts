@@ -20,6 +20,7 @@ export { decorateClient, type ManagedClient, type PromptArguments, type WrappedC
 // Config - Configuration validation
 export { type ValidationResult, validateServers } from './config/validate-config.ts';
 // Connection - MCP client connection utilities (internal helpers exposed for advanced use)
+export type { ClientInfo } from './connection/connect-client.ts';
 export type { JsonValue, PromptArgument, ToolArguments } from './connection/types.ts';
 // DCR - Dynamic Client Registration utilities
 export { DcrAuthenticator } from './dcr/dcr-authenticator.ts';

@@ -8,6 +8,7 @@ import http from 'node:http';
 import { DynamicClientRegistrar } from '@mcp-z/client';
 import assert from 'assert';
 import getPort from 'get-port';
+import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
 import { startDcrTestServer } from '../../lib/servers/dcr-test-server.mjs';
 
 const REDIRECT_URI = 'http://localhost:8080/callback';
@@ -94,7 +95,6 @@ describe('unit/auth/dynamic-client-registrar', () => {
   it('should register as a native client with the OS-assigned loopback redirect URI (SEP-837, RFC 8252)', async () => {
     // An authorization server rejects a loopback redirect_uri for a web
     // client, which is why this registration must declare application_type.
-    const port = await getPort();
     const callbackPort = await getPort();
     const redirectUri = `http://localhost:${callbackPort}/callback`;
 
@@ -110,12 +110,10 @@ describe('unit/auth/dynamic-client-registrar', () => {
         res.end(JSON.stringify({ client_id: 'captured_client', client_secret: 'captured_secret' }));
       });
     });
-    await new Promise<void>((resolve) => {
-      server.listen(port, () => resolve());
-    });
+    const port = await listenOnFreePort(server, '127.0.0.1');
 
     try {
-      await registrar.registerClient(`http://localhost:${port}/register`, { redirectUri, allowLoopback: true });
+      await registrar.registerClient(`http://127.0.0.1:${port}/register`, { redirectUri, allowLoopback: true });
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => {

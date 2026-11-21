@@ -5,17 +5,19 @@
  * Automatically detects transport type from URL protocol or type field.
  */
 
-import type { AuthProvider, ClientOptions, Transport, VersionNegotiationOptions } from '@modelcontextprotocol/client';
+import type { AuthProvider, ClientOptions, Implementation, Transport, VersionNegotiationOptions } from '@modelcontextprotocol/client';
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import getPort from 'get-port';
 import { probeAuthCapabilities } from '../auth/index.ts';
-import { DCR_CAPABILTY_DISCOVERY_TIMEOUT } from '../constants.ts';
+import { DCR_CAPABILTY_DISCOVERY_TIMEOUT, LEGACY_CLIENT_INFO } from '../constants.ts';
 import type { DcrAuthenticatorOptions } from '../dcr/index.ts';
 import { SignIn } from '../dcr/sign-in.ts';
 import { normalizeUrl } from '../lib/url-utils.ts';
 import type { ServerProcess } from '../spawn/spawn-server.ts';
 import type { ServersConfig } from '../spawn/spawn-servers.ts';
+
+/** What a client sends about itself in `initialize`: the MCP Implementation (`name`, `version` and the optional `title`, `websiteUrl`, `icons`), sent as given. */
+export type ClientInfo = Implementation;
 
 /**
  * Minimal interface for connecting to servers.
@@ -210,6 +212,12 @@ export async function connectMcpClient(
     dcrAuthenticator?: Partial<DcrAuthenticatorOptions>;
     logger?: Logger;
     versionNegotiation?: VersionNegotiationOptions;
+    /**
+     * What this client sends to the server in `initialize`, as given: your application's own `name` and real `version`, and optionally `title`, `websiteUrl` and `icons`.
+     * Through a registry it overrides the registry's `clientInfo`. Legacy fallback: with neither, the client sends `mcp-cli-client` 1.0.0, and the next major removes that fallback and requires one.
+     * A second connect to a stdio server the registry has already connected reuses the first connect's client, so its `clientInfo` is not sent again.
+     */
+    clientInfo?: ClientInfo;
     /** Cancels readiness, authentication, and transport connection work. */
     signal?: AbortSignal;
   }
@@ -240,7 +248,8 @@ export async function connectMcpClient(
   }
 
   // Create MCP client
-  const client = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
+  const clientInfo = options?.clientInfo ?? LEGACY_CLIENT_INFO;
+  const client = new Client(clientInfo, clientOptions);
   // The client that ends up connected: the first one, or the one made after a transport signed in again.
   let connected = client;
 
@@ -305,14 +314,9 @@ export async function connectMcpClient(
     if (capabilities.supportsDcr || capabilities.supportsCimd) {
       logger.debug(`🔐 Server '${serverName}' supports OAuth sign-in`);
 
-      // The loopback IP literal, which RFC 8252 section 8.3 recommends over `localhost`
-      const port = await getPort({ host: '127.0.0.1' });
-      const redirectUri = `http://127.0.0.1:${port}/callback`;
-
-      // Handle authentication using DcrAuthenticator with fully resolved redirectUri
+      // The callback binds 127.0.0.1 on a port the system assigns when a browser sign-in starts, unless the caller passes a redirectUri.
       const authenticator = new SignIn({
         headless: false,
-        redirectUri,
         logger,
         ...options?.dcrAuthenticator,
       });
@@ -344,7 +348,7 @@ export async function connectMcpClient(
         }
         signInAttempted = true;
         if (!(await signIn.completePending())) throw error;
-        const retry = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
+        const retry = new Client(clientInfo, clientOptions);
         await connectTransportWithTimeout(retry, makeTransport(), HTTP_CONNECTION_TIMEOUT_MS, operation, options?.signal);
         return retry;
       } finally {
@@ -389,7 +393,7 @@ export async function connectMcpClient(
       }
 
       // Create new client for SSE transport (required per SDK pattern)
-      const sseClient = new Client({ name: 'mcp-cli-client', version: '1.0.0' }, clientOptions);
+      const sseClient = new Client(clientInfo, clientOptions);
 
       // Return the SSE client instead of the original
       return await connectWithSignIn(sseClient, () => new SSEClientTransport(url, httpTransportOptions(serverConfig.headers, authProvider)), 'SSE connection');
