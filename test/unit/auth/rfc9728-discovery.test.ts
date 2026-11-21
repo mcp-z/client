@@ -8,7 +8,6 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import assert from 'assert';
 import express from 'express';
-import getPort from 'get-port';
 import { DiscoveryFetchError, speculativeProbe } from '../../../src/auth/discovery-fetch.ts';
 import { discoverAuthorizationServerMetadata, discoverProtectedResourceMetadata } from '../../../src/auth/rfc9728-discovery.ts';
 import { listenOnFreePort } from '../../lib/listen-on-free-port.ts';
@@ -87,10 +86,7 @@ describe('unit/auth/rfc9728-discovery', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;
 
   before(async () => {
-    dcrServer = await startDcrTestServer({
-      port: 9997,
-      baseUrl: 'http://localhost:9997',
-    });
+    dcrServer = await startDcrTestServer({ host: '127.0.0.1' });
   });
 
   after(async () => {
@@ -99,18 +95,18 @@ describe('unit/auth/rfc9728-discovery', () => {
 
   describe('discoverProtectedResourceMetadata', () => {
     it('should discover protected resource metadata from root location', async () => {
-      const metadata = await discoverProtectedResourceMetadata('http://localhost:9997');
+      const metadata = await discoverProtectedResourceMetadata(dcrServer.url);
 
-      assert.strictEqual(metadata?.resource, 'http://localhost:9997');
-      assert.deepStrictEqual(metadata?.authorization_servers, ['http://localhost:9997']);
+      assert.strictEqual(metadata?.resource, dcrServer.url);
+      assert.deepStrictEqual(metadata?.authorization_servers, [dcrServer.url]);
       assert.deepStrictEqual(metadata?.scopes_supported, ['read', 'write']);
     });
 
     it('should discover metadata from MCP sub-path location', async () => {
-      const metadata = await discoverProtectedResourceMetadata('http://localhost:9997/mcp');
+      const metadata = await discoverProtectedResourceMetadata(`${dcrServer.url}/mcp`);
 
-      assert.strictEqual(metadata?.resource, 'http://localhost:9997/mcp');
-      assert.deepStrictEqual(metadata?.authorization_servers, ['http://localhost:9997']);
+      assert.strictEqual(metadata?.resource, `${dcrServer.url}/mcp`);
+      assert.deepStrictEqual(metadata?.authorization_servers, [dcrServer.url]);
       assert.deepStrictEqual(metadata?.scopes_supported, ['read', 'write']);
     });
 
@@ -267,11 +263,11 @@ describe('unit/auth/rfc9728-discovery', () => {
 
     it('should use root metadata for paths without specific metadata', async () => {
       // RFC 9728: Root metadata applies to all sub-paths unless overridden
-      const metadata = await discoverProtectedResourceMetadata('http://localhost:9997/nonexistent');
+      const metadata = await discoverProtectedResourceMetadata(`${dcrServer.url}/nonexistent`);
 
       // Should return root metadata as it applies to all resources under this origin
-      assert.strictEqual(metadata?.resource, 'http://localhost:9997');
-      assert.deepStrictEqual(metadata?.authorization_servers, ['http://localhost:9997']);
+      assert.strictEqual(metadata?.resource, dcrServer.url);
+      assert.deepStrictEqual(metadata?.authorization_servers, [dcrServer.url]);
     });
 
     it('should return null on invalid URL', async () => {
@@ -280,21 +276,19 @@ describe('unit/auth/rfc9728-discovery', () => {
 
     it('should handle deep paths like /api/v1/mcp', async () => {
       // Even with deep paths, should check origin first, then sub-path
-      const metadata = await discoverProtectedResourceMetadata('http://localhost:9997/api/v1/mcp');
+      const metadata = await discoverProtectedResourceMetadata(`${dcrServer.url}/api/v1/mcp`);
 
       // Should find metadata at origin (returns resource: baseUrl)
-      assert.strictEqual(metadata?.resource, 'http://localhost:9997');
-      assert.deepStrictEqual(metadata?.authorization_servers, ['http://localhost:9997']);
+      assert.strictEqual(metadata?.resource, dcrServer.url);
+      assert.deepStrictEqual(metadata?.authorization_servers, [dcrServer.url]);
     });
 
     it('should follow resource_metadata from WWW-Authenticate header', async () => {
-      const port = await getPort();
-      const baseUrl = `http://localhost:${port}`;
       const server = await startDcrTestServer({
-        port,
-        baseUrl,
-        wwwAuthenticateResourceMetadata: `${baseUrl}/.well-known/oauth-protected-resource/mcp`,
+        host: '127.0.0.1',
+        wwwAuthenticateResourceMetadataPath: '/.well-known/oauth-protected-resource/mcp',
       });
+      const baseUrl = server.url;
 
       try {
         const metadata = await discoverProtectedResourceMetadata(`${baseUrl}/mcp`);
@@ -350,21 +344,21 @@ describe('unit/auth/rfc9728-discovery', () => {
     // an untrusted caller must NOT get this for free just because the target
     // happens to be loopback.
     it('should discover authorization server metadata from .well-known endpoint', async () => {
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997', { allowLoopback: true });
+      const metadata = await discoverAuthorizationServerMetadata(dcrServer.url, { allowLoopback: true });
 
-      assert.strictEqual(metadata?.issuer, 'http://localhost:9997');
-      assert.strictEqual(metadata?.authorization_endpoint, 'http://localhost:9997/oauth/authorize');
-      assert.strictEqual(metadata?.token_endpoint, 'http://localhost:9997/oauth/token');
-      assert.strictEqual(metadata?.registration_endpoint, 'http://localhost:9997/oauth/register');
+      assert.strictEqual(metadata?.issuer, dcrServer.url);
+      assert.strictEqual(metadata?.authorization_endpoint, `${dcrServer.url}/oauth/authorize`);
+      assert.strictEqual(metadata?.token_endpoint, `${dcrServer.url}/oauth/token`);
+      assert.strictEqual(metadata?.registration_endpoint, `${dcrServer.url}/oauth/register`);
       assert.deepStrictEqual(metadata?.scopes_supported, ['read', 'write']);
     });
 
     it('should extract origin from URLs with paths', async () => {
       // Should check origin even if given a URL with path
-      const metadata = await discoverAuthorizationServerMetadata('http://localhost:9997/some/path', { allowLoopback: true });
+      const metadata = await discoverAuthorizationServerMetadata(`${dcrServer.url}/some/path`, { allowLoopback: true });
 
-      assert.strictEqual(metadata?.issuer, 'http://localhost:9997');
-      assert.strictEqual(metadata?.authorization_endpoint, 'http://localhost:9997/oauth/authorize');
+      assert.strictEqual(metadata?.issuer, dcrServer.url);
+      assert.strictEqual(metadata?.authorization_endpoint, `${dcrServer.url}/oauth/authorize`);
     });
 
     it('should reject on network error for an advertised authorization server', async () => {
@@ -408,8 +402,8 @@ describe('unit/auth/rfc9728-discovery', () => {
       // (no grant) - this is exactly the SSRF case: an untrusted caller
       // cannot get discovery routed to a loopback address for free. An
       // advertised location rejects; a speculative one reads as "not offered".
-      await assert.rejects(discoverAuthorizationServerMetadata('http://localhost:9997'), /Refusing to fetch/);
-      assert.strictEqual(await speculativeProbe(undefined, () => discoverAuthorizationServerMetadata('http://localhost:9997')), null);
+      await assert.rejects(discoverAuthorizationServerMetadata(dcrServer.url), /Refusing to fetch/);
+      assert.strictEqual(await speculativeProbe(undefined, () => discoverAuthorizationServerMetadata(dcrServer.url)), null);
     });
 
     it('should reject when the discovery request is aborted in flight', async () => {

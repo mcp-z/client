@@ -16,10 +16,7 @@ describe('integration/dcr-auth', () => {
   let tokenStore: Keyv;
 
   before(async () => {
-    dcrServer = await startDcrTestServer({
-      port: 9990,
-      baseUrl: 'http://localhost:9990',
-    });
+    dcrServer = await startDcrTestServer({ host: '127.0.0.1' });
   });
 
   after(async () => {
@@ -34,7 +31,7 @@ describe('integration/dcr-auth', () => {
   });
 
   it('should perform full DCR + OAuth flow (simulated)', async () => {
-    const baseUrl = 'http://localhost:9990';
+    const baseUrl = dcrServer.url;
 
     // 1. Probe for DCR capabilities
     const capabilities = await probeAuthCapabilities(baseUrl);
@@ -64,7 +61,7 @@ describe('integration/dcr-auth', () => {
   });
 
   it('should reuse existing valid tokens', async () => {
-    const baseUrl = 'http://localhost:9990';
+    const baseUrl = dcrServer.url;
 
     // Store valid tokens
     const validTokens: TokenSet = {
@@ -83,7 +80,7 @@ describe('integration/dcr-auth', () => {
   });
 
   it('should handle expired tokens requiring refresh', async () => {
-    const baseUrl = 'http://localhost:9990';
+    const baseUrl = dcrServer.url;
 
     // Store expired tokens
     const expiredTokens: TokenSet = {
@@ -103,7 +100,7 @@ describe('integration/dcr-auth', () => {
   });
 
   it('should isolate tokens by base URL', async () => {
-    const baseUrl1 = 'http://localhost:9990';
+    const baseUrl1 = dcrServer.url;
     const baseUrl2 = 'http://localhost:9991';
 
     const tokens1: TokenSet = {
@@ -130,8 +127,8 @@ describe('integration/dcr-auth', () => {
   });
 
   it('should delete tokens for specific base URL', async () => {
-    const baseUrl = 'http://localhost:9990';
-    const issuer = 'http://localhost:9990';
+    const baseUrl = dcrServer.url;
+    const issuer = dcrServer.url;
     const tokenKey = `tokens:${issuer}:${baseUrl}`;
 
     const tokens: TokenSet = {
@@ -161,7 +158,7 @@ describe('integration/dcr-auth', () => {
     const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes (matches DcrAuthenticator constant)
 
     it('should reuse valid tokens without calling refresh', async () => {
-      const baseUrl = 'http://localhost:9990';
+      const baseUrl = dcrServer.url;
 
       // Store tokens that are valid for 1 hour (well outside refresh buffer)
       const validTokens: TokenSet = {
@@ -184,7 +181,7 @@ describe('integration/dcr-auth', () => {
     });
 
     it('should detect tokens within refresh buffer (5 minutes)', async () => {
-      const baseUrl = 'http://localhost:9990';
+      const baseUrl = dcrServer.url;
 
       // Store tokens that will expire in 3 minutes (within 5-minute buffer)
       const nearExpiryTokens: TokenSet = {
@@ -205,7 +202,7 @@ describe('integration/dcr-auth', () => {
     });
 
     it('should detect expired tokens', async () => {
-      const baseUrl = 'http://localhost:9990';
+      const baseUrl = dcrServer.url;
 
       // Store expired tokens
       const expiredTokens: TokenSet = {
@@ -225,7 +222,7 @@ describe('integration/dcr-auth', () => {
     });
 
     it('should store client credentials for refresh', async () => {
-      const baseUrl = 'http://localhost:9990';
+      const baseUrl = dcrServer.url;
 
       // Store tokens with client credentials (needed for refresh)
       const tokensWithCreds: TokenSet = {
@@ -247,7 +244,7 @@ describe('integration/dcr-auth', () => {
     });
 
     it('should handle tokens without refresh token', async () => {
-      const baseUrl = 'http://localhost:9990';
+      const baseUrl = dcrServer.url;
 
       // Store tokens without refresh token (can't be refreshed)
       // Use type assertion since this tests runtime behavior where refresh token may be absent

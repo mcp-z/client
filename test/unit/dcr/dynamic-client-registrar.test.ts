@@ -18,10 +18,7 @@ describe('unit/auth/dynamic-client-registrar', () => {
   let registrar: DynamicClientRegistrar;
 
   before(async () => {
-    dcrServer = await startDcrTestServer({
-      port: 9998,
-      baseUrl: 'http://localhost:9998',
-    });
+    dcrServer = await startDcrTestServer({ host: '127.0.0.1' });
     registrar = new DynamicClientRegistrar();
   });
 
@@ -37,7 +34,7 @@ describe('unit/auth/dynamic-client-registrar', () => {
   // from an untrusted server's AS metadata) fails closed. See the SSRF test
   // below and discovery-fetch.test.ts for the refusal case.
   it('should register client successfully', async () => {
-    const credentials = await registrar.registerClient('http://localhost:9998/oauth/register', { redirectUri: REDIRECT_URI, allowLoopback: true });
+    const credentials = await registrar.registerClient(`${dcrServer.url}/oauth/register`, { redirectUri: REDIRECT_URI, allowLoopback: true });
 
     assert.ok(credentials.clientId);
     assert.ok(credentials.clientSecret);
@@ -46,7 +43,7 @@ describe('unit/auth/dynamic-client-registrar', () => {
   });
 
   it('should accept custom client name', async () => {
-    const credentials = await registrar.registerClient('http://localhost:9998/oauth/register', {
+    const credentials = await registrar.registerClient(`${dcrServer.url}/oauth/register`, {
       clientName: 'test-client',
       redirectUri: REDIRECT_URI,
       allowLoopback: true,
@@ -57,7 +54,7 @@ describe('unit/auth/dynamic-client-registrar', () => {
   });
 
   it('should accept custom redirect URIs', async () => {
-    const credentials = await registrar.registerClient('http://localhost:9998/oauth/register', {
+    const credentials = await registrar.registerClient(`${dcrServer.url}/oauth/register`, {
       redirectUri: 'http://localhost:8080/callback',
       allowLoopback: true,
     });
@@ -82,7 +79,7 @@ describe('unit/auth/dynamic-client-registrar', () => {
   it('should handle 404 errors', async () => {
     await assert.rejects(
       async () => {
-        await registrar.registerClient('http://localhost:9998/invalid', { redirectUri: REDIRECT_URI, allowLoopback: true });
+        await registrar.registerClient(`${dcrServer.url}/invalid`, { redirectUri: REDIRECT_URI, allowLoopback: true });
       },
       (error: Error) => {
         assert.ok(error.message.includes('DCR registration failed'));
@@ -130,9 +127,9 @@ describe('unit/auth/dynamic-client-registrar', () => {
     // This is the dangerous case the loopback-trust design exists for:
     // registrationEndpoint is typically sourced from a remote server's AS
     // metadata. A malicious/compromised server returning
-    // registration_endpoint: "http://localhost:9998/oauth/register" must not
+    // registration_endpoint: "<loopback server>/oauth/register" must not
     // get this request sent, even though something happens to be listening.
-    await assert.rejects(registrar.registerClient('http://localhost:9998/oauth/register', { redirectUri: REDIRECT_URI }), (error: Error) => {
+    await assert.rejects(registrar.registerClient(`${dcrServer.url}/oauth/register`, { redirectUri: REDIRECT_URI }), (error: Error) => {
       assert.ok(error.message.includes('trusted loopback origin'), error.message);
       return true;
     });

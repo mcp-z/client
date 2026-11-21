@@ -18,10 +18,7 @@ describe('unit/auth/capability-discovery', () => {
   let dcrServer: Awaited<ReturnType<typeof startDcrTestServer>>;
 
   before(async () => {
-    dcrServer = await startDcrTestServer({
-      port: 9999,
-      baseUrl: 'http://localhost:9999',
-    });
+    dcrServer = await startDcrTestServer({ host: '127.0.0.1' });
   });
 
   after(async () => {
@@ -96,13 +93,13 @@ describe('unit/auth/capability-discovery', () => {
   });
 
   it('should detect DCR support from .well-known endpoint', async () => {
-    const capabilities = await probeAuthCapabilities('http://localhost:9999');
+    const capabilities = await probeAuthCapabilities(dcrServer.url);
 
     assert.strictEqual(capabilities.supportsDcr, true);
-    assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
-    assert.strictEqual(capabilities.authorizationEndpoint, 'http://localhost:9999/oauth/authorize');
-    assert.strictEqual(capabilities.tokenEndpoint, 'http://localhost:9999/oauth/token');
-    assert.strictEqual(capabilities.issuer, 'http://localhost:9999');
+    assert.strictEqual(capabilities.registrationEndpoint, `${dcrServer.url}/oauth/register`);
+    assert.strictEqual(capabilities.authorizationEndpoint, `${dcrServer.url}/oauth/authorize`);
+    assert.strictEqual(capabilities.tokenEndpoint, `${dcrServer.url}/oauth/token`);
+    assert.strictEqual(capabilities.issuer, dcrServer.url);
     assert.strictEqual(capabilities.authorizationResponseIssSupported, false);
     assert.deepStrictEqual(capabilities.scopes, ['read', 'write']);
   });
@@ -239,38 +236,38 @@ describe('unit/auth/capability-discovery', () => {
 
   describe('MCP endpoint path handling (BUG FIX)', () => {
     it('should extract origin from MCP endpoint with /mcp path [CURRENTLY FAILS]', async () => {
-      // Test Case: MCP at http://localhost:9999/mcp
-      // Should check: http://localhost:9999/.well-known/oauth-authorization-server
-      // Currently FAILS because it checks: http://localhost:9999/mcp/.well-known/...
+      // Test Case: MCP at <server>/mcp
+      // Should check: <server>/.well-known/oauth-authorization-server
+      // Currently FAILS because it checks: <server>/mcp/.well-known/...
 
-      const capabilities = await probeAuthCapabilities('http://localhost:9999/mcp');
+      const capabilities = await probeAuthCapabilities(`${dcrServer.url}/mcp`);
 
       assert.strictEqual(capabilities.supportsDcr, true, 'Should discover DCR from origin');
-      assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
-      assert.strictEqual(capabilities.authorizationEndpoint, 'http://localhost:9999/oauth/authorize');
+      assert.strictEqual(capabilities.registrationEndpoint, `${dcrServer.url}/oauth/register`);
+      assert.strictEqual(capabilities.authorizationEndpoint, `${dcrServer.url}/oauth/authorize`);
     });
 
     it('should handle deep paths like /api/v1/mcp [CURRENTLY FAILS]', async () => {
-      const capabilities = await probeAuthCapabilities('http://localhost:9999/api/v1/mcp');
+      const capabilities = await probeAuthCapabilities(`${dcrServer.url}/api/v1/mcp`);
 
       assert.strictEqual(capabilities.supportsDcr, true, 'Should discover DCR from origin regardless of path depth');
-      assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
+      assert.strictEqual(capabilities.registrationEndpoint, `${dcrServer.url}/oauth/register`);
     });
 
     it('should continue working for origin-only URLs (regression test)', async () => {
       // Ensure we didn't break existing functionality
-      const capabilities = await probeAuthCapabilities('http://localhost:9999');
+      const capabilities = await probeAuthCapabilities(dcrServer.url);
 
       assert.strictEqual(capabilities.supportsDcr, true);
-      assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
+      assert.strictEqual(capabilities.registrationEndpoint, `${dcrServer.url}/oauth/register`);
     });
 
     it('should ignore query and fragment on MCP endpoint', async () => {
-      const capabilities = await probeAuthCapabilities('http://localhost:9999/mcp?foo=bar#baz');
+      const capabilities = await probeAuthCapabilities(`${dcrServer.url}/mcp?foo=bar#baz`);
 
       assert.strictEqual(capabilities.supportsDcr, true);
-      assert.strictEqual(capabilities.registrationEndpoint, 'http://localhost:9999/oauth/register');
-      assert.strictEqual(capabilities.authorizationEndpoint, 'http://localhost:9999/oauth/authorize');
+      assert.strictEqual(capabilities.registrationEndpoint, `${dcrServer.url}/oauth/register`);
+      assert.strictEqual(capabilities.authorizationEndpoint, `${dcrServer.url}/oauth/authorize`);
     });
   });
 });
