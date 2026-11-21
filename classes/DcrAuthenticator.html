@@ -15,7 +15,7 @@
 It runs the SDK's auth() over the token store: registration (a client metadata document or DCR), the browser sign-in, and token refresh.</p>
 </div></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/1178b5761069c2b08234383e22bc888953b660a5/src/dcr/dcr-authenticator.ts#L36">src/dcr/dcr-authenticator.ts:36</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7867e2d4ad2ec76dd106dd6650438b355dd3363d/src/dcr/dcr-authenticator.ts#L36">src/dcr/dcr-authenticator.ts:36</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -45,7 +45,7 @@ It runs the SDK's auth() over the token store: registration (a client metadata d
 <li><span><span class="tsd-kind-parameter">options</span>: <a href="../interfaces/DcrAuthenticatorOptions.html" class="tsd-signature-type tsd-kind-interface">DcrAuthenticatorOptions</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <a href="" class="tsd-signature-type tsd-kind-class">DcrAuthenticator</a></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/1178b5761069c2b08234383e22bc888953b660a5/src/dcr/dcr-authenticator.ts#L39">src/dcr/dcr-authenticator.ts:39</a></li></ul></aside></div></li></ul></section></section></details>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7867e2d4ad2ec76dd106dd6650438b355dd3363d/src/dcr/dcr-authenticator.ts#L39">src/dcr/dcr-authenticator.ts:39</a></li></ul></aside></div></li></ul></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -67,7 +67,7 @@ RFC 8707 resource, precisely so this can find them without doing discovery.</p>
 <li><span><span class="tsd-kind-parameter">mcpServerUrl</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/1178b5761069c2b08234383e22bc888953b660a5/src/dcr/dcr-authenticator.ts#L75">src/dcr/dcr-authenticator.ts:75</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7867e2d4ad2ec76dd106dd6650438b355dd3363d/src/dcr/dcr-authenticator.ts#L75">src/dcr/dcr-authenticator.ts:75</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="ensureauthenticated"><span>ensure<wbr/>Authenticated</span><a href="#ensureauthenticated" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -96,12 +96,12 @@ the path is what identifies the resource an issued token is bound to.</p>
 <h4 class="tsd-anchor-link" id="throws">Throws<a href="#throws" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><p>Error if authentication fails</p>
 </div>
 <div class="tsd-tag-example">
-<h4 class="tsd-anchor-link" id="example">Example<a href="#example" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><pre><code class="ts"><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">authenticator</span><span class="hl-1"> = </span><span class="hl-5">new</span><span class="hl-1"> </span><span class="hl-0">DcrAuthenticator</span><span class="hl-1">({ </span><span class="hl-4">redirectUri:</span><span class="hl-1"> </span><span class="hl-2">&#39;http://127.0.0.1:3000/callback&#39;</span><span class="hl-1"> });</span><br/><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">tokens</span><span class="hl-1"> = </span><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-4">authenticator</span><span class="hl-1">.</span><span class="hl-0">ensureAuthenticated</span><span class="hl-1">(</span><br/><span class="hl-1">  </span><span class="hl-2">&#39;https://example.com/mcp&#39;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">capabilities</span><br/><span class="hl-1">);</span>
+<h4 class="tsd-anchor-link" id="example">Example<a href="#example" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4><pre><code class="ts"><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">authenticator</span><span class="hl-1"> = </span><span class="hl-5">new</span><span class="hl-1"> </span><span class="hl-0">DcrAuthenticator</span><span class="hl-1">({ </span><span class="hl-4">headless:</span><span class="hl-1"> </span><span class="hl-5">true</span><span class="hl-1"> });</span><br/><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">tokens</span><span class="hl-1"> = </span><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-4">authenticator</span><span class="hl-1">.</span><span class="hl-0">ensureAuthenticated</span><span class="hl-1">(</span><br/><span class="hl-1">  </span><span class="hl-2">&#39;https://example.com/mcp&#39;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">capabilities</span><br/><span class="hl-1">);</span>
 </code><button type="button">Copy</button></pre>
 
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/1178b5761069c2b08234383e22bc888953b660a5/src/dcr/dcr-authenticator.ts#L62">src/dcr/dcr-authenticator.ts:62</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7867e2d4ad2ec76dd106dd6650438b355dd3363d/src/dcr/dcr-authenticator.ts#L62">src/dcr/dcr-authenticator.ts:62</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

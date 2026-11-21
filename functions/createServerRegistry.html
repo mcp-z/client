@@ -32,6 +32,12 @@ Use <code>registry.connect()</code> for lazy MCP connection.</p>
 </div>
 <ul class="tsd-parameters">
 <li class="tsd-parameter">
+<h5 id="clientinfo"><code class="tsd-tag">Optional</code><span class="tsd-kind-property">clientInfo</span><span class="tsd-signature-symbol">?: </span><span class="tsd-signature-symbol">{}</span></h5>
+<div class="tsd-comment tsd-typography"><p>What every connect this registry makes sends to the server in <code>initialize</code> (<code>name</code>, <code>version</code> and optionally <code>title</code>, <code>websiteUrl</code>, <code>icons</code>), including the connects
+<code>searchCapabilities</code> makes. The <code>clientInfo</code> of a single <code>connect</code> overrides it. Set your application's own name and real version.
+Legacy fallback: with neither, the client sends <code>mcp-cli-client</code> 1.0.0, and the next major removes that fallback and requires one.</p>
+</div></li>
+<li class="tsd-parameter">
 <h5 id="cwd"><code class="tsd-tag">Optional</code><span class="tsd-kind-property">cwd</span><span class="tsd-signature-symbol">?: </span><span class="tsd-signature-type">string</span></h5>
 <div class="tsd-comment tsd-typography"><p>Working directory for spawned processes (default: process.cwd())</p>
 </div></li>
@@ -75,7 +81,7 @@ If omitted, process.env is used as the base (default behavior).</p>
 
 </div></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/mcp-z/client/blob/1178b5761069c2b08234383e22bc888953b660a5/src/spawn/spawn-servers.ts#L327">src/spawn/spawn-servers.ts:327</a></li></ul></aside></div></li></ul></section></div>
+<li>Defined in <a href="https://github.com/mcp-z/client/blob/7867e2d4ad2ec76dd106dd6650438b355dd3363d/src/spawn/spawn-servers.ts#L334">src/spawn/spawn-servers.ts:334</a></li></ul></aside></div></li></ul></section></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
